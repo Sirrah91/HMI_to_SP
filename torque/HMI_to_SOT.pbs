@@ -1,0 +1,36 @@
+#!/bin/sh
+
+
+###############################################################
+# PBS part
+###############################################################
+
+# Assigns a job name
+#PBS -N HMI_to_SOT
+
+# Assigns the queue
+#PBS -q eternity
+
+#Join option  
+# PBS -j oe
+# PBS -M d.korda@seznam.cz
+
+# Sends mail to the user when the job begins, ends, aborts.
+# PBS -m a
+
+#PBS -o /nfshome/david/NN/log/${PBS_JOBID}_HMI_to_SOT.out
+#PBS -e /nfshome/david/NN/log/${PBS_JOBID}_HMI_to_SOT.err
+
+#PBS -V
+PBS_O_WORKDIR=${WD}
+
+##############################################################
+# Execution
+##############################################################
+# Move to the directory where the Python script is located
+cd "${PBS_O_WORKDIR}" || exit
+
+export MPLBACKEND="Agg"
+
+# Run the Python script
+./main_torque ${SETTINGS} 2>&1 | tee "${LD}/${PBS_JOBID}_HMI_to_SOT.log"
