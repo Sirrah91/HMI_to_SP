@@ -150,6 +150,9 @@ def prepare_hmi_data(ar_number: int | None, obs_start: str | None = None, obs_en
 
         already_done = ar_dict["downloaded"]
 
+    filenames = []
+    header_infos = []
+
     if skip_already_done and already_done:
         print(f"Active region {ar_number} was already processed. Skipping it.")
 
@@ -185,7 +188,15 @@ def prepare_hmi_data(ar_number: int | None, obs_start: str | None = None, obs_en
                                    boxunits="pixels", boxsize=size_px)
 
         # rescale HMI to Hinode pixel size and resave to npz
-        read_hmi_original(outdir, ar_number=ar_number)
+        filename = read_hmi_original(outdir, ar_number=ar_number)
+
+        filenames.append(filename)
+        header_infos.append({"ar_num": ar_number,
+                             "t_obs": obs_start,
+                             "t_ref": t_ref,
+                             "locunits": "stony",
+                             "location": stony_ref if isinstance(stony_ref, str) else tuple_coordinate_to_str(stony_ref),
+                             "HMI_file": filename})
 
         # delete the fits
         shutil.rmtree(outdir)
@@ -193,7 +204,7 @@ def prepare_hmi_data(ar_number: int | None, obs_start: str | None = None, obs_en
         stony_ref[1] += tracking_speed
 
     # make predictions on the HMI data and save them to fits
-    resave_predictions_to_fits(ar_numbers=[ar_number])
+    resave_predictions_to_fits(filenames=filenames, info_data=header_infos)
 
 
 def ar_info(ar_number: int) -> dict:
@@ -209,7 +220,8 @@ def ar_info(ar_number: int) -> dict:
         if " " in info["t_ref"]:
             info["t_ref"] = info["t_ref"].split(" ")[0]
 
-        info["location"] = info["location"].replace(" ", "")
+        if isinstance(info["location"], str):
+            info["location"] = info["location"].replace(" ", "")
         info["downloaded"] = isinstance(info["downloaded"], str) and info["downloaded"].lower() == "yes"
 
         return info
@@ -228,6 +240,20 @@ def str_coordinate_to_tuple(coordinate_string: str) -> list[float]:
         coordinate_string[0] = float(coordinate_string[0][1:])
     else:
         coordinate_string[0] = -float(coordinate_string[0][1:])
+
+    return coordinate_string
+
+
+def tuple_coordinate_to_str(coordinate_tuple: tuple[float]) -> str:
+    if coordinate_tuple[0] >= 0.:
+        coordinate_string = f"N{int(np.round(coordinate_tuple[0]))}"
+    else:
+        coordinate_string = f"S{int(np.round(coordinate_tuple[0]))}"
+
+    if coordinate_tuple[1] >= 0.:
+        coordinate_string = f"{coordinate_string}W{int(np.round(coordinate_tuple[1]))}"
+    else:
+        coordinate_string = f"{coordinate_string}E{int(np.round(-coordinate_tuple[1]))}"
 
     return coordinate_string
 
@@ -346,57 +372,59 @@ def jsoc_query_simple(obs_date: str, quantity: str,
     return out_dir
 
 
-def resave_predictions_to_fits(ar_numbers: list[int], model_name: str = "weights_1111_20240513105441.h5"):
+def resave_predictions_to_fits(filenames: list[str], info_data: list[dict],
+                               model_name: str = "weights_1111_20240513105441.h5"):
 
     n_splits = 5
 
-    data_dir = "/nfsscratch/david/NN/data/datasets"
     outdir = "/nfsscratch/david/NN/results"
     check_dir(outdir)
 
-    for AR_number in ar_numbers:
-        info = ar_info(AR_number)
-        del info["downloaded"]
+    for filename, info in zip(filenames, info_data):
+        print(f"Data file: {filename}")
+        data = load_npz(filename)
 
-        filenames = sorted(glob(path.join(data_dir, f"AR_{AR_number}*")))
+        filename = path.join(outdir, path.split(filename)[1].replace("npz", "fits"))
 
-        for filename in filenames:
-            print(f"Data file: {filename}")
-            data = load_npz(filename)
+        obs_time = data["obs_time"]
 
-            filename = path.join(outdir, path.split(filename)[1].replace("npz", "fits"))
+        indices = list(KFold(n_splits=n_splits).split(obs_time))
 
-            obs_time = data["obs_time"]
-            results = np.zeros((len(obs_time), 1024, 1024, 4), dtype=np.float32)
+        results = np.zeros_like(data["HMI"])  # slow but correct
+        for i_indices in range(n_splits):
+            results[indices[i_indices][1]] = evaluate(model_names=[model_name],
+                                                      filename_or_data=data["HMI"][indices[i_indices][1]],
+                                                      proportiontocut=conf_model_setup["trim_mean_cut"],
+                                                      params=conf_model_setup["params"],
+                                                      subfolder_model=conf_model_setup["model_subdir"],
+                                                      b_unit="G")
+        """
+        results = stack([evaluate(model_names=[model_name],
+                                  filename_or_data=data["HMI"][indices[i_indices][1]],
+                                  proportiontocut=conf_model_setup["trim_mean_cut"],
+                                  params=conf_model_setup["params"],
+                                  subfolder_model=conf_model_setup["model_subdir"],
+                                  b_unit="G")
+                         for i_indices in range(n_splits)], axis=0)
+        """
 
-            indices = list(KFold(n_splits=n_splits).split(obs_time))
+        # Create a table HDU for the string array
+        cols = [fits.Column(name="OBSERVATION_TIME", array=obs_time, format="27A")]
+        hdu_table = fits.BinTableHDU.from_columns(cols)
+        primary_hdu = fits.PrimaryHDU(results)
 
-            for i_indices in range(n_splits):
-                results[indices[i_indices][1]] = evaluate(model_names=[model_name],
-                                                          filename_or_data=data["HMI"][indices[i_indices][1]],
-                                                          proportiontocut=conf_model_setup["trim_mean_cut"],
-                                                          params=conf_model_setup["params"],
-                                                          subfolder_model=conf_model_setup["model_subdir"],
-                                                          b_unit="G")
+        for key, value in info.items():
+            if key == "ar_number": key = "AR_num"
 
-            # Create a table HDU for the string array
-            cols = [fits.Column(name="OBSERVATION_TIME", array=obs_time, format="27A")]
-            hdu_table = fits.BinTableHDU.from_columns(cols)
-            primary_hdu = fits.PrimaryHDU(results)
+            hdu_table.header[key] = str(value)
+            primary_hdu.header[key] = str(value)
 
-            for key, value in info.items():
-                if key == "ar_number": key = "AR_num"
+        primary_hdu.header["QUANTITY"] = "[Ic, B zonal, B meridional, B radial]"
+        primary_hdu.header["UNITS"] = "[cont. norm., G, G, G]"
+        primary_hdu.header["NN_MODEL"] = model_name
 
-                hdu_table.header[key] = str(value)
-                primary_hdu.header[key] = str(value)
-
-            hdu_table.header["QUANTITY"] = "[intensity, zonal field, meridional field, radial field]"
-            hdu_table.header["UNITS"] = "[cont. norm., G, G, G]"
-            primary_hdu.header["QUANTITY"] = "[intensity, zonal field, meridional field, radial field]"
-            primary_hdu.header["UNITS"] = "[cont. norm., G, G, G]"
-
-            hdul = fits.HDUList([primary_hdu, hdu_table])
-            hdul.writeto(filename, overwrite=True)
+        hdul = fits.HDUList([primary_hdu, hdu_table])
+        hdul.writeto(filename, overwrite=True)
 
 
 def spherical_to_cartesian(r: np.ndarray, theta: np.ndarray, phi: np.ndarray) -> np.ndarray:
@@ -873,7 +901,7 @@ def filter_files(files: list[str]) -> list[str]:
                    and path.isfile(file.replace("field", "1.continuum").replace("hmi.b", "hmi.ic"))])
 
 
-def read_hmi_original(subfolder_or_SP_filename: str, ar_number: str | None = None) -> None:
+def read_hmi_original(subfolder_or_SP_filename: str, ar_number: str | None = None) -> str:
     hmi_dir = subfolder_or_SP_filename.replace(".fits", "")
     if ar_number is None:
         final_name = path.join(_path_data, f"{next((s for s in hmi_dir.split(path.sep)[::-1] if s), 'unknown')}.npz")
@@ -918,6 +946,8 @@ def read_hmi_original(subfolder_or_SP_filename: str, ar_number: str | None = Non
     check_dir(final_name)
     with open(final_name, "wb") as f:
         np.savez_compressed(f, obs_time=obs_time, HMI=np.array(HMI, dtype=_wp))
+
+    return final_name
 
 
 def remove_outliers(image: np.ndarray, kernel_size: int = 7, n_std: float = 3.) -> np.ndarray:
@@ -998,7 +1028,12 @@ def combine_data_to_patches(patch_size: int | None = None, interpolate_outliers:
 
 
 if __name__ == "__main__":
-    for ar_number in [11267, 11268, 11269, 11270, 11272, 11276, 11278, 11280, 11281, 11285, 11288, 11294]:
+    ar_numbers = [11067, 11082, 11095, 11096, 11098, 11103, 11116, 11122, 11125, 11132, 11134, 11137, 11139, 11142,
+                  11143, 11144, 11145, 11146, 11152, 11154, 11155, 11156, 11159, 11167, 11173, 11179, 11182, 11192,
+                  11194, 11206, 11207, 11209, 11211, 11221, 11223, 11229, 11231, 11237, 11239, 11241, 11246, 11247,
+                  11249, 11256, 11258, 11262, 11266, 11267, 11268, 11269, 11270, 11272, 11273, 11276, 11278, 11280,
+                  11281, 11285, 11288, 11291, 11293, 11294]
+    for ar_number in ar_numbers:
         try:
             prepare_hmi_data(ar_number=ar_number)
         except Exception:
