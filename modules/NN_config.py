@@ -61,7 +61,7 @@ quantity_names = np.array(["intensity",
                            "zonal magnetic field",
                            "meridional magnetic field",
                            "radial magnetic field"])
-quantity_names_short = np.array(["I", "Bp", "Bt", "Br"])
-quantity_names_short_latex = np.array([r"$I$", r"$B_p$", r"$B_t$", r"$B_r$"])
+quantity_names_short = np.array(["Ic", "Bp", "Bt", "Br"])
+quantity_names_short_latex = np.array([r"$I_c$", r"$B_p$", r"$B_t$", r"$B_r$"])
 
 config_check(output_setup=conf_output_setup, data_split_setup=conf_data_split_setup, model_setup=conf_model_setup)
