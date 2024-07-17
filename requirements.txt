@@ -9,7 +9,7 @@ numpy==1.23.5
 packaging==23.2
 pandas==1.5.3
 protobuf==3.20.3
-scikit-learn==1.2.2
+scikit-learn==1.5.1
 scikit-image==0.22.0
 scipy==1.11.1
 sunpy==5.1.1
