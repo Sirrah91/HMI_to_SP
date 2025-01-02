@@ -348,7 +348,7 @@ def evaluate_by_parts(model_names: list[str], filename_or_data: str | np.ndarray
     return convert_unit(predictions, initial_unit=_b_unit, final_unit=final_b_unit, used_quantities=used_quantities_total)
 
 
-def process_patches(image_4d: np.ndarray, model_names: list[str], kernel_size: int | str = "auto",
+def process_patches(model_names: list[str], image_4d: np.ndarray, kernel_size: int | str = "auto",
                     proportiontocut: float | None = None,
                     initial_b_unit: Literal["kG", "G", "T", "mT"] = "kG",
                     final_b_unit: Literal["kG", "G", "T", "mT"] | None = None,
