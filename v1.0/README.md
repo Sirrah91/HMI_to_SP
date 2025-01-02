@@ -2,7 +2,7 @@
 
 1. **Specify parameters** in `./modules/NN_config.py`, particularly the `conf_output_setup["used_quantities"]` setting.
 2. In `./main.py`, set the path to the training data in the `data_filename` variable. The path can be either absolute or relative to the `_path_data` value in `./modules/_constants.py`.
-3. If the data are not prepared in patches, use `load_data` in `./main.py` instead of `load_prepared_data`.
+3. If the data are not in patches, use the `load_data` function in `./main.py` (located in `./modules/NN_data.py`) instead of the `load_prepared_data` function (also located in `./modules/NN_data.py`).
 4. For **model retraining**, specify the model name in the `model_to_retrain` variable in `./main.py`. This can be an absolute path or relative to the `_path_model` value in `./modules/_constants.py`.
 5. Run `./main.py` to initiate the training or retraining process.
 
