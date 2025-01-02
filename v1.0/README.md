@@ -12,5 +12,8 @@
 3. We recommend using the `process_patches` function in `./modules/NN_evaluate.py` for evaluation.
 4. **Minimum version**:
    ```python
+   from modules.utilities_data import prepare_hmi_data
+   from modules.NN_evaluate import process_patches
+   
    data = prepare_hmi_data(hmi_fits)
    predictions_4d = process_patches(model_names=[list, of, used, models], image_4d=data)
