@@ -41,3 +41,12 @@
 # Pretrained Models
 
 For more information about the pretrained models, including details about training, tests, and performance, please refer to the paper by **David Korda, Jan Jurčák, Michal Švanda, and Nazaret Bello González, 2025, A&A, XXX, XXX** (https://doi.org/XXX).
+
+The pretrained models are named using a 4-bit binary code, where each bit indicates which quantity is included in the model:
+
+- The **first bit** represents the continuum intensity.
+- The **second bit** represents the zonal magnetic field.
+- The **third bit** represents the azimuthal magnetic field.
+- The **fourth bit** represents the radial magnetic field.
+
+For example, a model with a name containing the binary code `1010` would include the continuum intensity and azimuthal magnetic field, but not the zonal or radial fields.
