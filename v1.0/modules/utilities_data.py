@@ -412,6 +412,10 @@ def prepare_hmi_data(fits_ic: str | None = None,
     return rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=iptr)
 
 
+def arcsec_to_Mm(arcsec: float, distanceAU: float = 1.):
+    return np.atan(u.arcsec.to(u.rad, arcsec)) * u.AU.to(u.Mm, distanceAU)
+
+
 def model_name_to_result_name(model_name: str) -> str:
     return f"{split_path(model_name)[1].replace('weights', 'results', 1)}.npz"
 
