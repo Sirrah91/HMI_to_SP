@@ -8,7 +8,7 @@
 # Model Evaluation
 
 1. **Load your data** as a 4D numpy array. The expected shape is `(num_observations, lat, lon, num_quantities)`.
-2. Data can be collected from FITS files using the `prepare_hmi_data` function in `./modules/utilities_data.py`.
+2. Data can be collected from FITS files using the `prepare_hmi_data` function in `./modules/utilities_data.py`. We note that `prepare_hmi_data` rotates the data such that north is up and west is left.
 3. We recommend using the `process_patches` function in `./modules/NN_evaluate.py` for evaluation. This function is scalable and allows evaluation of full-disk observations with low memory usage.
 4. **Minimum version**:
    ```python
@@ -32,3 +32,4 @@
 
    # Make predictions on the data
    predictions_4d = process_patches(model_names=model_names, image_4d=data)
+5. The data are provided at the **Hinode/SOT-SP resolution**, with latitude and longitude steps of `dlat = 0.319978` and `dlon = 0.29714` (arcsec per pixel).
