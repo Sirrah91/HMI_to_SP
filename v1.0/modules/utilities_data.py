@@ -360,11 +360,10 @@ def prepare_hmi_data(fits_ic: str | None = None,
     hmi_to_sp_rows, hmi_to_sp_cols = calc_hmi_to_sp_resolution(fast=True)
 
     if fits_ic is not None:
-        from modules.align_data import normalize_intensity
-
         used_quantities[0] = True
         with fits.open(fits_ic) as hdu:
             ic = np.array(hdu[1].data, dtype=_wp)
+            index = hdu[1].header
         ic = normalize_intensity(ic)
 
         nrows, ncols = np.shape(ic)
@@ -407,8 +406,10 @@ def prepare_hmi_data(fits_ic: str | None = None,
         bptr = np.array([], dtype=_wp)
 
     iptr = stack((ic, bptr), axis=0)
+    iptr = np.expand_dims(np.transpose(iptr, axes=(1, 2, 0)), axis=0)
 
-    return np.expand_dims(np.transpose(iptr, axes=(1, 2, 0)), axis=0)
+    lon, lat = return_lonlat(index)
+    return rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=iptr)
 
 
 def model_name_to_result_name(model_name: str) -> str:
@@ -915,8 +916,16 @@ def hmi_psf(target_shape: tuple[int, int] | int = 65, calc_new: bool = False) ->
 
         with fits.open(file_orig) as hdu:
             unsharp = hdu[1].data
+            index_unsharp = hdu[1].header
         with fits.open(file_dcon) as hdu:
             sharp = hdu[1].data
+            index_sharp = hdu[1].header
+
+        # Observations are in N up, W left
+        lon, lat = return_lonlat(index_unsharp)
+        unsharp = rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=np.expand_dims(unsharp, axis=0))[0]
+        lon, lat = return_lonlat(index_sharp)
+        sharp = rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=np.expand_dims(sharp, axis=0))[0]
 
         N = 401
         unsharp = unsharp[2048 - N // 2:2048 + N // 2 + 1, 2048 - N // 2:2048 + N // 2 + 1]
@@ -1256,6 +1265,11 @@ def remove_limb_darkening(data: np.ndarray, thresh: float = 0.6, normalised_thre
     return data / np.reshape(V @ coefficients, (nx, ny))
 
 
+def normalize_intensity(image: np.ndarray) -> np.ndarray:
+    # return rescale_intensity(imge=image, thresh=0.9)
+    return remove_limb_darkening(data=image, thresh=0.6, normalised_thresh=True)
+
+
 def calculate_contrast(image: np.ndarray) -> float:
     """Calculate contrast as standard deviation divided by mean."""
     mean_value, std_dev = return_mean_std(image)
@@ -1317,3 +1331,4 @@ def calculate_sharpness_matrics(image: np.ndarray) -> dict:
     print()
 
     return metrics
+

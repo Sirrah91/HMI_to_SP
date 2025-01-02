@@ -1,7 +1,6 @@
 from modules.NN_config import conf_grid_setup
-from modules.utilities_data import (save_data, load_npz, rescale_intensity, disambigue_azimuth, hmi_psf, data_b2ptr,
-                                    remove_limb_darkening, read_cotemporal_fits, convert_unit, hmi_noise,
-                                    split_data_to_patches)
+from modules.utilities_data import (save_data, load_npz, disambigue_azimuth, hmi_psf, data_b2ptr, normalize_intensity,
+                                    read_cotemporal_fits, convert_unit, hmi_noise, split_data_to_patches)
 from modules.utilities import (rmse, remove_outliers_sliding_window, check_dir, stack, interpolate_mask, remove_nan,
                                apply_psf, is_empty, pad_zeros_or_crop, return_mean_std, plot_me, create_circular_mask,
                                filter_fft_amplitude)
@@ -24,7 +23,6 @@ import warnings
 import drms
 from tqdm import tqdm
 from typing import Literal
-from functools import partial
 
 from astropy.io import fits
 from sunpy.time import TimeRange
@@ -39,15 +37,11 @@ from skimage.registration import optical_flow_tvl1
 import matplotlib as mpl
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-
-# normalize_intensity = partial(rescale_intensity, thresh=0.9)
-normalize_intensity = partial(remove_limb_darkening, thresh=0.6, normalised_thresh=True)
-
 hmi_dy_median, hmi_dx_median = 0.504310727, 0.504310727
 sp_dy_median, sp_dx_median = 0.319978, 0.29714
 
 
-def jsoc_query_from_sp_name(SP_filename: str, quantity: str, data_type: Literal["", "_dcon", "_dconS"],
+def jsoc_query_from_sp_name(SP_filename: str, quantity: str, data_type: Literal["", "_dcon", "_dconS"] = "",
                             integration_time: int | None = None) -> None:
     warnings.filterwarnings("ignore")
 
@@ -1239,8 +1233,8 @@ def pipeline_alignment(skip_jsoc_query: bool = False,
     if not skip_jsoc_query:
         for SP_filename in tqdm(SP_filenames):
             try:
-                jsoc_query_from_sp_name(SP_filename, quantity="I")
-                jsoc_query_from_sp_name(SP_filename, quantity="B")
+                jsoc_query_from_sp_name(SP_filename, quantity="I", data_type="")
+                jsoc_query_from_sp_name(SP_filename, quantity="B", data_type="")
             except Exception:  # sometimes got drms.exceptions.DrmsExportError:  [status=4]
                 print(traceback.format_exc())
                 continue
