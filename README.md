@@ -1,7 +1,7 @@
 # HMI_to_SP
 
-The project aims to upscale and deconvolve SDO/HMI data to resolution and quality of the Hinode/SOT-SP data. Especially continuum intensity and vector magnetic field in local reference frame.
+The project aims to upscale and deconvolve SDO/HMI data to match the resolution and quality of Hinode/SOT-SP data, particularly focusing on continuum intensity and the vector magnetic field in the local reference frame.
 
-For more datails about a specific version, see the corresponding README.
+For more details about a specific version, please see the corresponding README.
 
-For any questions or comments, contact me at david.korda@asu.cas.cz.
+For any questions or comments, feel free to contact me at david.korda@asu.cas.cz.
