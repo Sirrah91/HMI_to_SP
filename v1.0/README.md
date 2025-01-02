@@ -37,3 +37,7 @@
    # Make predictions on the data
    predictions_4d = process_patches(model_names=model_names, image_4d=data)
 5. The data are provided at the **Hinode/SOT-SP resolution**, with latitude and longitude steps of `dlat = 0.319978` and `dlon = 0.29714` arcsec per pixel.
+
+# Model Tests
+
+For more information about the pretrained models, including details about training, tests, and performance, please refer to the paper by **David Korda, Jan Jurčák, Michal Švanda, and Nazaret Bello González**, published in *Astronomy & Astrophysics* (A&A), 2025.
