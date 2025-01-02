@@ -27,7 +27,7 @@
    }
 
    # Prepare the data from FITS files
-   # WARNING: This step may result in a large variable "data" and could cause memory error issues
+   # WARNING: This step may result in a large variable 'data' and could cause memory error issues
    # depending on the size of your input data.
    data = prepare_hmi_data(**hmi_fits)
 
