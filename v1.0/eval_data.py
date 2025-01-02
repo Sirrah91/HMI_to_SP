@@ -132,7 +132,7 @@ def end_to_end_evaluate(data_dir: str,
                         disambiguate: bool = False,
                         b_unit: Literal["kG", "G", "T", "mT"] = "G",
                         normalize_intensity: bool = True,
-                        used_quantities_str: str = "ptr",
+                        used_quantities_str: str = "iptr",
                         data_type: Literal["fits", "sav", "auto"] = "auto",
                         interpolate_outliers: bool = True,
                         max_valid_size: int = 256,  # px x px
@@ -209,14 +209,13 @@ def end_to_end_evaluate(data_dir: str,
             lonlat = np.array([resize(data_part, output_shape, anti_aliasing=True) for data_part in lonlat])
             lonlat = np.clip(lonlat, a_min=-90., a_max=90.)
 
-        predictions = process_patches(image_4d=data, model_names=model_names,
-                                      initial_b_unit=b_unit, final_b_unit=b_unit,
-                                      max_valid_size=max_valid_size, kernel_size="auto", subfolder_model="HMI_to_SOT")
-
         if np.size(lonlat[0]) > 0 and np.size(lonlat[1]) > 0:
             # rotate/flip the frames if needed (N in up and W in right)
-            predictions = rot_coordinates_to_NW(longitude=lonlat[0], latitude=lonlat[1], array_to_flip=predictions)
+            data = rot_coordinates_to_NW(longitude=lonlat[0], latitude=lonlat[1], array_to_flip=data)
             lonlat = rot_coordinates_to_NW(longitude=lonlat[0], latitude=lonlat[1], array_to_flip=lonlat)
+
+        predictions = process_patches(model_names=model_names, image_4d=data, kernel_size="auto", initial_b_unit=b_unit,
+                                      final_b_unit=b_unit, max_valid_size=max_valid_size, subfolder_model="HMI_to_SOT")
 
         primary_hdu = fits.PrimaryHDU()
         hdu_list = [primary_hdu]
