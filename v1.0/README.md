@@ -1,8 +1,8 @@
 # New Model Training or Existing Model Retraining
 
-1. **Specify parameters** in `./modules/NN_config.py`, particularly the `"used_quantities"` setting.
-2. In `./main.py`, set the path to the training data in the `"data_filename"` variable. The path can be either absolute or relative to the `_path_data` value in `./modules/_constants.py`.
-3. For **model retraining**, specify the model name in the `"model_to_retrain"` variable in `./main.py`. This can be an absolute path or relative to the `_path_model` value in `./modules/_constants.py`.
+1. **Specify parameters** in `./modules/NN_config.py`, particularly the `used_quantities` setting.
+2. In `./main.py`, set the path to the training data in the `data_filename` variable. The path can be either absolute or relative to the `_path_data` value in `./modules/_constants.py`.
+3. For **model retraining**, specify the model name in the `model_to_retrain` variable in `./main.py`. This can be an absolute path or relative to the `_path_model` value in `./modules/_constants.py`.
 4. Run `./main.py` to initiate the training or retraining process.
 
 # Model Evaluation
