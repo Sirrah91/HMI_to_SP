@@ -32,4 +32,4 @@
 
    # Make predictions on the data
    predictions_4d = process_patches(model_names=model_names, image_4d=data)
-5. The data are provided at the **Hinode/SOT-SP resolution**, with latitude and longitude steps of `dlat = 0.319978` and `dlon = 0.29714` (arcsec per pixel).
+5. The data are provided at the **Hinode/SOT-SP resolution**, with latitude and longitude steps of `dlat = 0.319978` and `dlon = 0.29714` arcsec per pixel.
