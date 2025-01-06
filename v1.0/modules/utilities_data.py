@@ -412,8 +412,9 @@ def prepare_hmi_data(fits_ic: str | None = None,
     return rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=iptr)
 
 
-def arcsec_to_Mm(arcsec: float, distanceAU: float = 1.) -> float:
-    return 2. * np.tan(u.arcsec.to(u.rad, arcsec) / 2.) * u.AU.to(u.Mm, distanceAU)
+def arcsec_to_Mm(arcsec: float, distanceAU: float = 1., center_distance: bool = True) -> float:
+    fun = np.tan if center_distance else np.sin
+    return 2. * u.AU.to(u.Mm, distanceAU) * fun(u.arcsec.to(u.rad, arcsec) / 2.)
 
 
 def model_name_to_result_name(model_name: str) -> str:
