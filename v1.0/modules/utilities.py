@@ -31,12 +31,12 @@ import tracemalloc
 from linecache import getline
 
 
-def check_dir(dir_or_file_path: str) -> None:
+def check_dir(dir_or_file_path: str, is_file: bool = False) -> None:
     # This function checks if the directory exists. If not, the function creates it.
 
     dir_or_file_path = Path(dir_or_file_path)
 
-    if dir_or_file_path.suffix:
+    if is_file:
         directory = dir_or_file_path.parent
     else:
         directory = dir_or_file_path
@@ -1083,7 +1083,7 @@ def my_pca(x_data: np.ndarray,
 
 
 def my_mv(source: str, destination: str, mv_or_cp: str = "mv") -> None:
-    check_dir(destination)
+    check_dir(destination, is_file=True)
 
     if mv_or_cp == "mv":
         shutil.move(source, destination)

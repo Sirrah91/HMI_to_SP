@@ -1,5 +1,6 @@
 from modules.NN_config import conf_grid_setup
-from modules.utilities_data import (save_data, load_npz, disambigue_azimuth, hmi_psf, data_b2ptr, normalize_intensity,
+from modules.utilities_data import (save_data, load_npz, disambigue_azimuth, hmi_psf, data_b2ptr,
+                                    remove_limb_darkening_approx, normalise_intensity,
                                     read_cotemporal_fits, convert_unit, hmi_noise, split_data_to_patches)
 from modules.utilities import (rmse, remove_outliers_sliding_window, check_dir, stack, interpolate_mask, remove_nan,
                                apply_psf, is_empty, pad_zeros_or_crop, return_mean_std, plot_me, create_circular_mask,
@@ -302,26 +303,26 @@ def read_hmi_B(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = "pt
 
         cotemporal_fits = read_cotemporal_fits(fits_file, check_uniqueness=True)
 
-        field_fits = [fits_name for fits_name in cotemporal_fits if ".field" in fits_name]
-        if not field_fits:
+        field_fits = cotemporal_fits["fits_b"]
+        if field_fits is None:
             raise ValueError("(At least) one of field fits is missing. Check your data.")
-        index = fits.getheader(field_fits[0], 1)
-        b = fits.getdata(field_fits[0], 1)
+        index = fits.getheader(field_fits, 1)
+        b = fits.getdata(field_fits, 1)
 
-        inclination_fits = [fits_name for fits_name in cotemporal_fits if ".inclination" in fits_name]
-        if not inclination_fits:
+        inclination_fits = cotemporal_fits["fits_inc"]
+        if inclination_fits is None:
             raise ValueError("(At least) one of inclination fits is missing. Check your data.")
-        bi = fits.getdata(inclination_fits[0], 1)
+        bi = fits.getdata(inclination_fits, 1)
 
-        azimuth_fits = [fits_name for fits_name in cotemporal_fits if ".azimuth" in fits_name]
-        if not azimuth_fits:
+        azimuth_fits = cotemporal_fits["fits_azi"]
+        if azimuth_fits is None:
             raise ValueError("(At least) one of azimuth fits is missing. Check your data.")
-        bg = fits.getdata(azimuth_fits[0], 1)
+        bg = fits.getdata(azimuth_fits, 1)
 
-        disambig_fits = [fits_name for fits_name in cotemporal_fits if ".disambig" in fits_name]
-        if not disambig_fits:
+        disambig_fits = cotemporal_fits["fits_disamb"]
+        if disambig_fits is None:
             raise ValueError("(At least) one of disambig fits is missing. Check your data.")
-        bgd = np.array(fits.getdata(disambig_fits[0], 1), dtype=int)
+        bgd = np.array(fits.getdata(disambig_fits, 1), dtype=int)
 
         bg = disambigue_azimuth(bg, bgd, method=1,
                                 rotated_image="history" in index and "rotated" in str(index["history"]))
@@ -733,9 +734,9 @@ def align_SP_file(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
         # here is the first interpolation. Inclination/azimuth must be converted before!
         hmi_iptr[i], _ = get_hmi_sectors(quantity, SP_filename, hmi_ptr)
 
-    sp_iptr[index_continuum] = normalize_intensity(sp_iptr[index_continuum])
-    sp_iptr_hmilike[index_continuum] = normalize_intensity(sp_iptr_hmilike[index_continuum])
-    hmi_iptr[index_continuum] = normalize_intensity(hmi_iptr[index_continuum])
+    sp_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr[index_continuum]))
+    sp_iptr_hmilike[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr_hmilike[index_continuum]))
+    hmi_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(hmi_iptr[index_continuum]))
 
     sp_iptr[index_continuum] = np.clip(interpolate_mask(image=sp_iptr[index_continuum],
                                                         mask=sp_iptr[index_continuum] <= 0.,
@@ -749,10 +750,6 @@ def align_SP_file(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
                                                          mask=hmi_iptr[index_continuum] <= 0.,
                                                          interp_nans=True, fill_value=_num_eps),
                                         _num_eps, None)
-
-    sp_iptr[index_continuum] = normalize_intensity(sp_iptr[index_continuum])
-    sp_iptr_hmilike[index_continuum] = normalize_intensity(sp_iptr_hmilike[index_continuum])
-    hmi_iptr[index_continuum] = normalize_intensity(hmi_iptr[index_continuum])
 
     if control_plots:
         mplbackend = "TkAgg"  # must be done like this to confuse PyInstaller
@@ -775,7 +772,6 @@ def align_SP_file(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
     sp_iptr_hmilike[1:] = add_noise_realisation_old(array=sp_iptr_hmilike[1:], thresh=100.)
     # upscale again
     sp_iptr_hmilike = resize_data(sp_iptr_hmilike, final_shape=np.shape(sp_iptr[0]))
-    sp_iptr_hmilike[index_continuum] = normalize_intensity(sp_iptr_hmilike[index_continuum])
 
     # align HMI and SP data based on align_rules, remove NaNs, and rescale intensities
     # use original SP or blurred SP data to align original HMI with SP?
@@ -783,10 +779,6 @@ def align_SP_file(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
 
     _, sp_iptr = remove_nan(corrupted=hmi_iptr, clear=sp_iptr)
     hmi_iptr, sp_iptr_hmilike = remove_nan(corrupted=hmi_iptr, clear=sp_iptr_hmilike)
-
-    sp_iptr[index_continuum] = normalize_intensity(sp_iptr[index_continuum])
-    sp_iptr_hmilike[index_continuum] = normalize_intensity(sp_iptr_hmilike[index_continuum])
-    hmi_iptr[index_continuum] = normalize_intensity(hmi_iptr[index_continuum])
 
     if control_plots:
         for i, ax in enumerate(axes.values()):
@@ -800,9 +792,9 @@ def align_SP_file(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
         _, sp_iptr = remove_nan(corrupted=hmi_iptr, clear=sp_iptr)
         hmi_iptr, sp_iptr_hmilike = remove_nan(corrupted=hmi_iptr, clear=sp_iptr_hmilike)
 
-        sp_iptr[index_continuum] = normalize_intensity(sp_iptr[index_continuum])
-        sp_iptr_hmilike[index_continuum] = normalize_intensity(sp_iptr_hmilike[index_continuum])
-        hmi_iptr[index_continuum] = normalize_intensity(hmi_iptr[index_continuum])
+        sp_iptr[index_continuum] = normalise_intensity(sp_iptr[index_continuum])
+        sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum])
+        hmi_iptr[index_continuum] = normalise_intensity(hmi_iptr[index_continuum])
 
     if interpolate_outliers:  # remove outliers (slow...)
         print(f"Outliers are{'' if interpolate_outliers else ' not'} interpolated.")
@@ -810,9 +802,9 @@ def align_SP_file(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
         sp_iptr_hmilike = np.array([remove_outliers_sliding_window(image=data_part, kernel_size=7, n_std=3.) for data_part in sp_iptr_hmilike])
         hmi_iptr = np.array([remove_outliers_sliding_window(image=data_part, kernel_size=7, n_std=3.) for data_part in hmi_iptr])
 
-        sp_iptr[index_continuum] = normalize_intensity(sp_iptr[index_continuum])
-        sp_iptr_hmilike[index_continuum] = normalize_intensity(sp_iptr_hmilike[index_continuum])
-        hmi_iptr[index_continuum] = normalize_intensity(hmi_iptr[index_continuum])
+        sp_iptr[index_continuum] = normalise_intensity(sp_iptr[index_continuum])
+        sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum])
+        hmi_iptr[index_continuum] = normalise_intensity(hmi_iptr[index_continuum])
 
     """
     # adjust the histgram of sp_hmilike
@@ -868,16 +860,16 @@ def sp_to_hmilike_patches(SP_filename: str, coordinates: Literal["ptr", "ptr_nat
 
     # continuum and B in the given coordinates and G
     sp_iptr = read_sp(SP_filename=SP_filename, coordinates=coordinates)
-    sp_iptr[index_continuum] = normalize_intensity(sp_iptr[index_continuum])
+    sp_iptr[index_continuum] = remove_limb_darkening_approx(sp_iptr[index_continuum])
 
     if interpolate_outliers:  # remove outliers (slow...)
         print(f"Outliers are{'' if interpolate_outliers else ' not'} interpolated.")
         sp_iptr = np.array([remove_outliers_sliding_window(image=data_part, kernel_size=7, n_std=2.) for data_part in sp_iptr])
-        sp_iptr[index_continuum] = normalize_intensity(sp_iptr[index_continuum])
+        sp_iptr[index_continuum] = remove_limb_darkening_approx(sp_iptr[index_continuum])
 
     # downscale SP observation to pixel size of HMI (SP and HMI both observe the same box)
     sp_iptr_hmilike = resize_data(data=sp_iptr, final_shape=sp_to_hmi_shape(SP_filename))
-    sp_iptr_hmilike[index_continuum] = normalize_intensity(sp_iptr_hmilike[index_continuum])
+    sp_iptr_hmilike[index_continuum] = remove_limb_darkening_approx(sp_iptr_hmilike[index_continuum])
 
     sp_iptr[index_continuum] = np.clip(interpolate_mask(image=sp_iptr[index_continuum],
                                                         mask=sp_iptr[index_continuum] <= 0.,
@@ -888,8 +880,8 @@ def sp_to_hmilike_patches(SP_filename: str, coordinates: Literal["ptr", "ptr_nat
                                                                 interp_nans=True, fill_value=_num_eps),
                                                _num_eps, None)
 
-    sp_iptr[index_continuum] = normalize_intensity(sp_iptr[index_continuum])
-    sp_iptr_hmilike[index_continuum] = normalize_intensity(sp_iptr_hmilike[index_continuum])
+    sp_iptr[index_continuum] = remove_limb_darkening_approx(sp_iptr[index_continuum])
+    sp_iptr_hmilike[index_continuum] = remove_limb_darkening_approx(sp_iptr_hmilike[index_continuum])
 
     if control_plots:
         mplbackend = "TkAgg"  # must be done like this to confuse PyInstaller
@@ -978,8 +970,8 @@ def sp_to_hmilike(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
     # downscale SP observation to pixel size of HMI (SP and HMI both observe the same box)
     sp_iptr_hmilike = resize_data(data=sp_iptr, final_shape=sp_to_hmi_shape(SP_filename))
 
-    sp_iptr[index_continuum] = normalize_intensity(sp_iptr[index_continuum])
-    sp_iptr_hmilike[index_continuum] = normalize_intensity(sp_iptr_hmilike[index_continuum])
+    sp_iptr[index_continuum] = remove_limb_darkening_approx(sp_iptr[index_continuum])
+    sp_iptr_hmilike[index_continuum] = remove_limb_darkening_approx(sp_iptr_hmilike[index_continuum])
 
     sp_iptr[index_continuum] = np.clip(interpolate_mask(image=sp_iptr[index_continuum],
                                                         mask=sp_iptr[index_continuum] <= 0.,
@@ -990,8 +982,8 @@ def sp_to_hmilike(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
                                                                 interp_nans=True, fill_value=_num_eps),
                                                _num_eps, None)
 
-    sp_iptr[index_continuum] = normalize_intensity(sp_iptr[index_continuum])
-    sp_iptr_hmilike[index_continuum] = normalize_intensity(sp_iptr_hmilike[index_continuum])
+    sp_iptr[index_continuum] = remove_limb_darkening_approx(sp_iptr[index_continuum])
+    sp_iptr_hmilike[index_continuum] = remove_limb_darkening_approx(sp_iptr_hmilike[index_continuum])
 
     if control_plots:
         mplbackend = "TkAgg"  # must be done like this to confuse PyInstaller
@@ -1013,7 +1005,7 @@ def sp_to_hmilike(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
     sp_iptr_hmilike[1:] = add_noise_realisation_old(array=sp_iptr_hmilike[1:], thresh=100.)
     # upscale again
     sp_iptr_hmilike = resize_data(sp_iptr_hmilike, final_shape=np.shape(sp_iptr[0]))
-    sp_iptr_hmilike[index_continuum] = normalize_intensity(sp_iptr_hmilike[index_continuum])
+    sp_iptr_hmilike[index_continuum] = remove_limb_darkening_approx(sp_iptr_hmilike[index_continuum])
 
     if control_plots:
         for i, ax in enumerate(axes.values()):
@@ -1025,8 +1017,8 @@ def sp_to_hmilike(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
         sp_iptr = np.array([remove_outliers_sliding_window(image=data_part, kernel_size=7, n_std=3.) for data_part in sp_iptr])
         sp_iptr_hmilike = np.array([remove_outliers_sliding_window(image=data_part, kernel_size=7, n_std=3.) for data_part in sp_iptr_hmilike])
 
-        sp_iptr[index_continuum] = normalize_intensity(sp_iptr[index_continuum])
-        sp_iptr_hmilike[index_continuum] = normalize_intensity(sp_iptr_hmilike[index_continuum])
+        sp_iptr[index_continuum] = remove_limb_darkening_approx(sp_iptr[index_continuum])
+        sp_iptr_hmilike[index_continuum] = remove_limb_darkening_approx(sp_iptr_hmilike[index_continuum])
 
     if control_plots:
         for i, ax in enumerate(axes.values()):
@@ -1146,7 +1138,7 @@ def combine_data_to_patches(data_folder: str, patch_size: int | None = None,
     sp = convert_unit(array=sp, initial_unit=initial_unit, final_unit=_b_unit, used_quantities=used_quantities)
     sp_hmi_like = convert_unit(array=sp_hmi_like, initial_unit=initial_unit, final_unit=_b_unit, used_quantities=used_quantities)
 
-    check_dir(output_name)
+    check_dir(output_name, is_file=True)
     save_data(final_name=output_name, observations=hmi, labels=sp, order="k", subfolder=_path_data,
               other_info={f"{_observations_name}_simulated": np.array(sp_hmi_like, dtype=_wp),
                           "units": ["quiet-Sun normalised", _b_unit, _b_unit, _b_unit],
@@ -1164,10 +1156,16 @@ def remove_sp_data_with_different_resolution(SP_filenames_to_delete: np.ndarray)
         os.remove(path.join(_path_sp, name_to_delete.replace(".fits", "_L2.1.fits")))
 
 
-def plot_sp_to_check(SP_filenames: list[str], image_start: int = 0, image_num: int | None = None, backend: str = "Agg") -> None:
+def plot_sp_to_check(SP_filenames: list[str] | None = None,
+                     image_start: int = 0,
+                     image_num: int | None = None,
+                     backend: str = "Agg") -> None:
     mpl.use(backend=backend)
     from matplotlib import pyplot as plt
     from modules._constants import _path_figures
+
+    if SP_filenames is None:
+        SP_filenames = sorted([sp_file for sp_file in os.listdir(_path_sp) if "L2.1" not in sp_file])
 
     if image_num is None:  # plot all
         image_num = len(SP_filenames) - image_start
@@ -1184,7 +1182,7 @@ def plot_sp_to_check(SP_filenames: list[str], image_start: int = 0, image_num: i
 
         for iax in range(len(ax)):
             if iax == 0:
-                x = normalize_intensity(sp[iax])
+                x = remove_limb_darkening_approx(sp[iax])
             else:
                 x = sp[iax]
             y_max, x_max = np.shape(x)
@@ -1205,7 +1203,7 @@ def plot_sp_to_check(SP_filenames: list[str], image_start: int = 0, image_num: i
 
         fig_name = SP_filenames[ii].replace(".fits", ".jpg")
         fig_full_name = path.join(_path_figures, "HMI_to_SOT", "SP_check", fig_name)
-        check_dir(fig_full_name)
+        check_dir(fig_full_name, is_file=True)
         fig.savefig(fig_full_name, format="jpg", **savefig_kwargs)
         plt.close(fig)
 
@@ -1369,7 +1367,7 @@ def pipeline_sp_to_hmilike_v2(coordinates: Literal["ptr", "ptr_native"] = "ptr_n
                               control_plots: bool = False,
                               alignment_plots: bool = True,
                               do_parallel: bool = False) -> None:
-    print("Blurring SP data to match HMI's resolution")
+    print("Blurring SP data to match HMI's resolution and add noise to each patch separately")
 
     if patch_size is None or patch_size <= 0: patch_size = conf_grid_setup["patch_size"]
 
@@ -1421,9 +1419,13 @@ if __name__ == "__main__":
                            interpolate_outliers=True,
                            subpixel_shift=True,
                            cut_edge_px=8,
+                           control_plots=False,
+                           alignment_plots=False,
                            do_parallel=False)
     else:
         pipeline_sp_to_hmilike_v2(coordinates="ptr_native",
                                   interpolate_outliers=True,
                                   cut_edge_px=8,
+                                  control_plots=False,
+                                  alignment_plots=False,
                                   do_parallel=False)

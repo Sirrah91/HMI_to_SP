@@ -2,6 +2,8 @@ import matplotlib as mpl
 mpl.use("Agg")  # should be before importing pyplot
 import matplotlib.pyplot as plt
 
+from modules.decorators import safe_call
+
 from modules.NN_losses_metrics_activations import my_quantile
 
 from modules.utilities_data import load_npz, compute_metrics, used_indices, add_unit_to_names, filter_empty_data
@@ -22,6 +24,7 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 from copy import deepcopy
+import matplotlib.patches as patches
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from tensorflow.keras.callbacks import History
 
@@ -71,6 +74,7 @@ outdir_HMI_to_SOT = path.join(outdir, "HMI_to_SOT")
 check_dir(outdir_HMI_to_SOT)
 
 
+@safe_call
 def plot_quantity_maps(y_pred: np.ndarray, y_true: np.ndarray | None = None, x_true: np.ndarray | None = None,
                        used_quantities: np.ndarray | None = None,
                        merge_rows: int = 1, merge_cols: int = 1, num_plots: int = 1,
@@ -84,7 +88,6 @@ def plot_quantity_maps(y_pred: np.ndarray, y_true: np.ndarray | None = None, x_t
         print("Quantity maps")
     change_params(offset)
 
-    if fig_format is None: fig_format = fig_format
     if used_quantities is None: used_quantities = conf_output_setup["used_quantities"]
 
     if isinstance(y_pred, tuple | list):
@@ -162,7 +165,7 @@ def plot_quantity_maps(y_pred: np.ndarray, y_true: np.ndarray | None = None, x_t
                 vmaxs = np.nanmax((np.nanmax(col0, axis=(0, 1)), np.nanmax(col1, axis=(0, 1)), np.nanmax(col2, axis=(0, 1))), axis=0)
         cols = {"col0": col0, "col1": col1, "col2": col2, "col3": col3}
 
-        fig, ax = plt.subplots(num_quantities, num_columns, figsize=(5.5 * num_columns, 4 * num_quantities * (merge_rows - 1.)))
+        fig, ax = plt.subplots(num_quantities, num_columns, figsize=(6. * num_columns, 4. * num_quantities))
         ax = np.reshape(ax, (num_quantities, num_columns))  # force dimensions for the for cycle
 
         for irow in range(num_quantities):
@@ -194,6 +197,34 @@ def plot_quantity_maps(y_pred: np.ndarray, y_true: np.ndarray | None = None, x_t
                     cbar = plt.colorbar(sp, cax=cax)
                     cbar.ax.set_ylabel(used_names[irow])
 
+        """
+        # Bt best
+        for i in range(4):
+            ax[0, i].add_patch(patches.Rectangle((150, 101), 15, 15, linewidth=2, edgecolor="y", facecolor="none", linestyle="-"))
+
+        # Bp worst
+        ax[0, 2].add_patch(patches.Rectangle((144, 20), 15, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
+        ax[0, 2].add_patch(patches.Rectangle((144, 20), 15, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
+        ax[0, 2].add_patch(patches.Rectangle((17, 50), 15, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
+        ax[0, 2].add_patch(patches.Rectangle((35, 144), 15, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
+        ax[0, 2].add_patch(patches.Rectangle((115, 150), 20, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
+        ax[0, 2].add_patch(patches.Rectangle((170, 160), 20, 40, angle=55, linewidth=2, edgecolor="b", facecolor="none", linestyle="-"))
+        
+        # Bt worst
+        ax[0, 2].add_patch(patches.Rectangle((196, 0), 10, 72, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
+        
+        # Br best
+        for i in range(3):
+            ax[0, i].add_patch(patches.Rectangle((175, 89), 35, 50, linewidth=2, edgecolor="y", facecolor="none", linestyle="-"))
+            ax[0, i].add_patch(patches.Rectangle((175, 89), 35, 50, linewidth=2, edgecolor="y", facecolor="none", linestyle="-"))
+
+        # Br worst
+        for i in range(3):
+            ax[0, i].add_patch(patches.Rectangle((146, 40), 20, 30, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
+            ax[0, i].add_patch(patches.Rectangle((170, 5), 33, 18, linewidth=2, edgecolor="b", facecolor="none", linestyle="-"))
+
+        """
+
         if suptitle is not None:
             plt.suptitle(suptitle)
 
@@ -206,13 +237,14 @@ def plot_quantity_maps(y_pred: np.ndarray, y_true: np.ndarray | None = None, x_t
             fig_name = f"quantity_map{suf}_{ifig:0{n_digits}d}.{fig_format}"
 
         fig_full_name = path.join(outdir_HMI_to_SOT, subfolder, fig_name)
-        check_dir(fig_full_name)
+        check_dir(fig_full_name, is_file=True)
         fig.savefig(fig_full_name, format=fig_format, **savefig_kwargs, **pil_kwargs)
         plt.close(fig)
 
     change_params(offset, reset=True)
 
 
+@safe_call
 def plot_alignment(image1: np.ndarray, image2: np.ndarray, image3: np.ndarray | None = None,
                    offset: float = 0.,
                    subfolder: str = "alignment", suptitle: str | None = None,
@@ -291,13 +323,14 @@ def plot_alignment(image1: np.ndarray, image2: np.ndarray, image3: np.ndarray | 
 
     fig_name = f"alignment{suf}.{fig_format}"
     fig_full_name = path.join(outdir_HMI_to_SOT, subfolder, fig_name)
-    check_dir(fig_full_name)
+    check_dir(fig_full_name, is_file=True)
     fig.savefig(fig_full_name, format=fig_format, **savefig_kwargs, **pil_kwargs)
     plt.close(fig)
 
     change_params(offset, reset=True)
 
 
+@safe_call
 def plot_scatter_plots(y_true: np.ndarray, y_pred: np.ndarray,
                        used_quantities: np.ndarray | None = None,
                        offset: float = 0., subfolder: str = "", suptitle: str | None = None,
@@ -409,13 +442,14 @@ def plot_scatter_plots(y_true: np.ndarray, y_pred: np.ndarray,
 
     fig_name = f"scatter_plot{suf}.{fig_format}"
     fig_full_name = path.join(outdir_HMI_to_SOT, subfolder, fig_name)
-    check_dir(fig_full_name)
+    check_dir(fig_full_name, is_file=True)
     fig.savefig(fig_full_name, format=fig_format, **savefig_kwargs, **pil_kwargs)
     plt.close(fig)
 
     change_params(offset, reset=True)
 
 
+@safe_call
 def plot_hist2d_plots(y_true: np.ndarray, y_pred: np.ndarray,
                       used_quantities: np.ndarray | None = None,
                       norm: Literal["asinh", "function", "functionlog", "linear", "log", "logit", "symlog"] |
@@ -522,13 +556,14 @@ def plot_hist2d_plots(y_true: np.ndarray, y_pred: np.ndarray,
 
     fig_name = f"hist2d_plot{suf}.{fig_format}"
     fig_full_name = path.join(outdir_HMI_to_SOT, subfolder, fig_name)
-    check_dir(fig_full_name)
+    check_dir(fig_full_name, is_file=True)
     fig.savefig(fig_full_name, format=fig_format, **savefig_kwargs, **pil_kwargs)
     plt.close(fig)
 
     change_params(offset, reset=True)
 
 
+@safe_call
 def plot_error_evaluation(y_true: np.ndarray, y_pred: np.ndarray,
                           used_quantities: np.ndarray | None = None,
                           offset: float = 0., fig_format: str = default_fig_format,
@@ -635,13 +670,14 @@ def plot_error_evaluation(y_true: np.ndarray, y_pred: np.ndarray,
 
     fig_name = f"quantile_error_plot{suf}.{fig_format}"
     fig_full_name = path.join(outdir_HMI_to_SOT, subfolder, fig_name)
-    check_dir(fig_full_name)
+    check_dir(fig_full_name, is_file=True)
     fig.savefig(fig_full_name, format=fig_format, **savefig_kwargs, **pil_kwargs)
     plt.close(fig)
 
     change_params(offset, reset=True)
 
 
+@safe_call
 def plot_error_in_bins(y_true: np.ndarray, y_pred: np.ndarray,
                        used_quantities: np.ndarray | None = None,
                        offset: float = 0., fig_format: str = default_fig_format,
@@ -709,13 +745,14 @@ def plot_error_in_bins(y_true: np.ndarray, y_pred: np.ndarray,
 
     fig_name = f"bin_error_plot{suf}.{fig_format}"
     fig_full_name = path.join(outdir_HMI_to_SOT, subfolder, fig_name)
-    check_dir(fig_full_name)
+    check_dir(fig_full_name, is_file=True)
     fig.savefig(fig_full_name, format=fig_format, **savefig_kwargs, **pil_kwargs)
     plt.close(fig)
 
     change_params(offset, reset=True)
 
 
+@safe_call
 def plot_error_hist(y_true: np.ndarray,
                     y_pred: np.ndarray,
                     ae_limits: list[float],
@@ -786,13 +823,14 @@ def plot_error_hist(y_true: np.ndarray,
 
     fig_name = f"error_hist{suf}.{fig_format}"
     fig_full_name = path.join(outdir_HMI_to_SOT, subfolder, fig_name)
-    check_dir(fig_full_name)
+    check_dir(fig_full_name, is_file=True)
     fig.savefig(fig_full_name, format=fig_format, **savefig_kwargs, **pil_kwargs)
     plt.close(fig)
 
     change_params(offset, reset=True)
 
 
+@safe_call
 def quantity_control_plots(y_true: np.ndarray,
                            y_pred: np.ndarray,
                            quantity: Literal["ic", "bp", "bt", "br"],
@@ -953,13 +991,14 @@ def quantity_control_plots(y_true: np.ndarray,
 
     fig_name = f"{quantity}_control_plot{suf}.{fig_format}"
     fig_full_name = path.join(outdir_HMI_to_SOT, subfolder, fig_name)
-    check_dir(fig_full_name)
+    check_dir(fig_full_name, is_file=True)
     fig.savefig(fig_full_name, format=fig_format, **savefig_kwargs, **pil_kwargs)
     plt.close(fig)
 
     change_params(offset, reset=True)
 
 
+@safe_call
 def plot_error_density_plots(y_true: np.ndarray, y_pred: np.ndarray,
                              used_quantities: np.ndarray | None = None,
                              max_samples_to_use: int | None = None,
@@ -1024,13 +1063,14 @@ def plot_error_density_plots(y_true: np.ndarray, y_pred: np.ndarray,
 
     fig_name = f"density_error_plot{suf}.{fig_format}"
     fig_full_name = path.join(outdir_HMI_to_SOT, subfolder, fig_name)
-    check_dir(fig_full_name)
+    check_dir(fig_full_name, is_file=True)
     fig.savefig(path.join(outdir_HMI_to_SOT, subfolder, fig_name), format=fig_format, **savefig_kwargs, **pil_kwargs)
     plt.close(fig)
 
     change_params(offset, reset=True)
 
 
+@safe_call
 def plot_model_history(history: History, dt_string: str | None = None, blur_sigma: float | None = None,
                        offset: float = 0., fig_format: str = default_fig_format,
                        subfolder: str = "", quiet: bool = False) -> None:
@@ -1158,13 +1198,14 @@ def plot_model_history(history: History, dt_string: str | None = None, blur_sigm
         fig_name = f"model_history_{dt_string}.{fig_format}"
 
     fig_full_name = path.join(outdir, subfolder, fig_name)
-    check_dir(fig_full_name)
+    check_dir(fig_full_name, is_file=True)
     fig.savefig(fig_full_name, format=fig_format, **savefig_kwargs, **pil_kwargs)
     plt.close(fig)
 
     change_params(offset, reset=True)
 
 
+@safe_call
 def plot_corr_matrix(labels: np.ndarray, corr_matrix: pd.DataFrame,
                      offset: float = 0., subfolder: str = "", fig_format: str = default_fig_format,
                      suf: str = "", quiet: bool = False) -> None:
@@ -1214,13 +1255,14 @@ def plot_corr_matrix(labels: np.ndarray, corr_matrix: pd.DataFrame,
 
     fig_name = f"correlation_matrix{suf}.{fig_format}"
     fig_full_name = path.join(outdir, subfolder, fig_name)
-    check_dir(fig_full_name)
+    check_dir(fig_full_name, is_file=True)
     fig.savefig(fig_full_name, format=fig_format, **savefig_kwargs, **pil_kwargs)
     plt.close(fig)
 
     change_params(offset, reset=True)
 
 
+@safe_call
 def plot_ar_maps(ar_numbers: tuple[int] | list[int] | int, offset: float = 0., quiet: bool = False) -> None:
     change_params(offset)
 
@@ -1268,6 +1310,7 @@ def plot_ar_maps(ar_numbers: tuple[int] | list[int] | int, offset: float = 0., q
     change_params(offset, reset=True)
 
 
+@safe_call
 def result_plots(x_true: np.ndarray, y_true: np.ndarray, y_pred: np.ndarray,
                  used_quantities: np.ndarray | None = None,
                  norm: Literal["asinh", "function", "functionlog", "linear", "log", "logit", "symlog"] |
@@ -1302,6 +1345,7 @@ def result_plots(x_true: np.ndarray, y_true: np.ndarray, y_pred: np.ndarray,
                        suf=suf, quiet=quiet)
 
 
+@safe_call
 def plot_acc_test_results(filename: str, subfolder: str = "", fig_format: str = default_fig_format) -> None:
     full_path = path.join(_path_accuracy_tests, subfolder, filename)
     data = load_npz(full_path)

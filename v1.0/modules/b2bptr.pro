@@ -3,7 +3,7 @@
 ; otherwise type .r b2bprt.pro (or .run)
 
 ; Define the parent directory path
-parent_directory = '/nfsscratch/david/NN/data/SDO_HMI_dconS/'
+parent_directory = '/nfsscratch/david/NN/data/tmp/'
 
 ; Find all subfolders
 subfolders = FILE_SEARCH(parent_directory + '*')

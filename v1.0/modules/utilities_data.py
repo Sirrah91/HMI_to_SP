@@ -5,7 +5,8 @@ from modules.utilities import (check_dir, safe_arange, is_empty, stack, check_fi
 
 from modules._constants import (_path_data, _path_model, _model_suffix, _wp, _observations_key_name, _label_true_name,
                                 _label_name, _sep_out, _path_hmi, _observations_name, _config_name, _result_dir, _quiet,
-                                _path_accuracy_tests, _label_pred_name, _lat_name, _lon_name, _data_dir, _path_figures)
+                                _path_accuracy_tests, _label_pred_name, _lat_name, _lon_name, _data_dir, _path_figures,
+                                _num_eps)
 
 from modules.NN_config import quantity_names_short
 
@@ -80,7 +81,7 @@ def save_data(final_name: str, observations: np.ndarray,
     if other_info is not None:  # existing keys are not updated
         data_and_metadata = update_dict(new_dict=data_and_metadata, base_dict=other_info)
 
-    check_dir(final_name)
+    check_dir(final_name, is_file=True)
     with open(final_name, "wb") as f:
         np.savez_compressed(f, **data_and_metadata)
 
@@ -106,7 +107,7 @@ def save_results(final_name: str, y_pred: np.ndarray,
 
     final_name = filename_adjustment(final_name)
     filename = path.join(_path_accuracy_tests, subfolder, final_name)
-    check_dir(filename)
+    check_dir(filename, is_file=True)
 
     # collect data and metadata
     model_setup["model_names"] = model_names
@@ -128,13 +129,8 @@ def save_results(final_name: str, y_pred: np.ndarray,
         np.savez_compressed(f, **data_and_metadata)
 
 
-def rescale_intensity(image: np.ndarray, thresh: float = 0.9) -> np.ndarray:
-    new_image = np.copy(image)  # deepcopy here
-
-    new_image /= np.nanmax(new_image)
-    new_image /= np.nanmedian(new_image[new_image >= thresh])
-
-    return new_image
+def normalise_intensity(image: np.ndarray, threshold: float = 0.8) -> np.ndarray:
+    return image / np.nanmedian(image[image >= threshold * np.nanmax(image)]).astype(np.result_type(image))
 
 
 def load_npz(filename: str, subfolder: str = "", list_keys: list[str] | None = None,
@@ -313,7 +309,7 @@ def combine_files(filenames: tuple[str, ...], final_name: str, subfolder: str = 
         combined_file[_lat_name] = stack((combined_file[_lat_name], file_to_merge[_lat_name]), axis=0)
         combined_file[_lon_name] = stack((combined_file[_lon_name], file_to_merge[_lon_name]), axis=0)
 
-    check_dir(final_name)
+    check_dir(final_name, is_file=True)
     with open(final_name, "wb") as f:
         np.savez_compressed(f, **combined_file)
 
@@ -353,63 +349,111 @@ def prepare_hmi_data(fits_ic: str | None = None,
                      fits_b: str | None = None,
                      fits_inc: str | None = None,
                      fits_azi: str | None = None,
-                     fits_disamb: str | None = None) -> np.ndarray:
+                     fits_disamb: str | None = None,
+                     from_row: int | None = None,
+                     to_row: int | None = None,
+                     from_col: int | None = None,
+                     to_col: int | None = None,
+                     remove_limb_dark: bool = True,
+                     disambiguate: bool = True,
+                     interpolate_outliers: bool = True
+                     ) -> tuple[np.ndarray, ...]:
     from modules.align_data import calc_hmi_to_sp_resolution
-    used_quantities = np.zeros((4,), dtype=bool)
 
     hmi_to_sp_rows, hmi_to_sp_cols = calc_hmi_to_sp_resolution(fast=True)
 
-    if fits_ic is not None:
-        used_quantities[0] = True
-        with fits.open(fits_ic) as hdu:
-            ic = np.array(hdu[1].data, dtype=_wp)
+    def read_and_process_fits(file: str, dtype: type, process_fn=None) -> np.ndarray:
+        """Helper function to read and process FITS data in chunks."""
+        with fits.open(file, memmap=True) as hdu:
+            data = np.array(hdu[1].data)
+            header = hdu[1].header
+        return process_fn(data, header).astype(dtype) if callable(process_fn) else data.astype(dtype)
+
+    def resize_data(data: np.ndarray) -> np.ndarray:
+        """Resize data efficiently."""
+        output_shape = np.round([hmi_to_sp_rows * data.shape[0], hmi_to_sp_cols * data.shape[1]]).astype(int)
+        return resize(data, output_shape, anti_aliasing=True)
+
+    def crop_data(data: np.ndarray) -> np.ndarray:
+        """Crop data to the specified row and column range."""
+        if from_row is not None or from_col is not None:
+            return data[from_row:to_row, from_col:to_col]
+        return data
+
+    def process_intensity(fits_file: str) -> np.ndarray:
+        print("Processing Ic...")
+        if remove_limb_dark:
+            process_fn = lambda image, header: crop_data(remove_limb_darkening_exact(image, header))
+        else:
+            process_fn = lambda image, header: crop_data(image)
+
+        ic = read_and_process_fits(fits_file, dtype=_wp, process_fn=process_fn)
+        ic = resize_data(ic)
+        return normalise_intensity(ic, threshold=0.8)[np.newaxis, ..., np.newaxis]
+
+    def process_vector(fits_b: str, fits_inc: str, fits_azi: str, fits_disamb: str) -> np.ndarray:
+        print("Processing B vector...")
+
+        # Read data one by one to save memory
+        with fits.open(fits_b, memmap=True) as hdu:
             index = hdu[1].header
-        ic = normalize_intensity(ic)
 
-        nrows, ncols = np.shape(ic)
-        output_shape = np.array(np.round((hmi_to_sp_rows * nrows, hmi_to_sp_cols * ncols)), dtype=int)
-        ic = resize(ic, output_shape, anti_aliasing=True)
+        if disambiguate:
+            bvec = np.stack([
+                read_and_process_fits(fits_b, dtype=_wp),
+                read_and_process_fits(fits_inc, dtype=_wp),
+                disambigue_azimuth(read_and_process_fits(fits_azi, dtype=_wp),
+                                   read_and_process_fits(fits_disamb, dtype=int),
+                                   method=1,
+                                   rotated_image="history" in index and "rotated" in str(index["history"]))
+            ], axis=0)
+        else:
+            bvec = np.stack([
+                read_and_process_fits(fits_b, dtype=_wp),
+                read_and_process_fits(fits_inc, dtype=_wp),
+                read_and_process_fits(fits_azi, dtype=_wp)
+            ], axis=0)
 
-        ic = normalize_intensity(ic)
-        ic = np.expand_dims(ic, axis=0)
+        # Convert to local reference frame
+        bvec = list(data_b2ptr(index=index, bvec=bvec))
 
-    else:
-        ic = np.array([], dtype=_wp)
+        # Interpolate and resize each component individually
+        for i, data_part in enumerate(bvec):
+            data_part = crop_data(data_part)  # Crop after `data_b2ptr`
+            if interpolate_outliers:
+                data_part = interpolate_outliers_median(data_part, kernel_size=3, threshold_type="amplitude", threshold=10000.)
+            bvec[i] = resize_data(data_part)
+        return np.transpose(bvec, axes=(1, 2, 0)).astype(_wp)[np.newaxis, ...]
 
-    if None not in [fits_b, fits_inc, fits_azi, fits_disamb]:
-        used_quantities[1:] = True
-        with fits.open(fits_b) as hdu:
-            b = np.array(hdu[1].data, dtype=_wp)
-            index = hdu[1].header
-        with fits.open(fits_inc) as hdu:
-            bi = np.array(hdu[1].data, dtype=_wp)
-        with fits.open(fits_azi) as hdu:
-            bg = np.array(hdu[1].data, dtype=_wp)
-        with fits.open(fits_disamb) as hdu:
-            bgd = np.array(hdu[1].data, dtype=int)
+    # Process data (overwrite variables to minimise memory use)
+    data = None
+    if None not in [fits_b, fits_inc, fits_azi]:
+        if fits_disamb is None and disambiguate:
+            raise ValueError("Invalid input: Disambig fits not available.")
 
-        bg = disambigue_azimuth(bg, bgd, method=1, rotated_image="history" in index and "rotated" in str(index["history"]))
-        bptr = data_b2ptr(index=index, bvec=np.array([b, bi, bg], dtype=_wp))
+        data = process_vector(fits_b, fits_inc, fits_azi, fits_disamb)
+    if fits_ic:
+        ic = process_intensity(fits_ic)
+        data = ic if data is None else np.concatenate([ic, data], axis=-1)
 
-        bptr = np.array([interpolate_outliers_median(data_part, kernel_size=3, threshold_type="amplitude", threshold=10000.)
-                         for data_part in bptr])
+    if data is None:
+        raise ValueError("Invalid input: No fits in the function input.")
 
-        _, nrows, ncols = np.shape(bptr)
-        output_shape = np.array(np.round((hmi_to_sp_rows * nrows, hmi_to_sp_cols * ncols)), dtype=int)
-        bptr = np.array([resize(data_part, output_shape, anti_aliasing=True) for data_part in bptr])
+    print("Correction for disk orientation")
+    # Determine longitude and latitude from header
+    header_source = fits_ic or fits_b
+    with fits.open(header_source, memmap=True) as hdu:
+        header = hdu[1].header
+    lon, lat = return_lonlat(header)
 
-        bptr = np.array([interpolate_outliers_median(data_part, kernel_size=3, threshold_type="amplitude", threshold=10000.)
-                         for data_part in bptr])
+    # Rotate coordinates to ensure North is up and East is left
+    data = rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=data)
+    lon, lat = rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=[lon, lat])
+    lon, lat = resize_data(lon), resize_data(lat)
+    lon, lat = np.clip(lon, a_min=-90., a_max=90.), np.clip(lat, a_min=-90., a_max=90.)
 
-        bptr = np.array(bptr, dtype=_wp)  # should not be necessary
-    else:
-        bptr = np.array([], dtype=_wp)
-
-    iptr = stack((ic, bptr), axis=0)
-    iptr = np.expand_dims(np.transpose(iptr, axes=(1, 2, 0)), axis=0)
-
-    lon, lat = return_lonlat(index)
-    return rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=iptr)
+    # If B is included, Bp: +W, Bt: +S, Br: -grav
+    return data, lon, lat
 
 
 def arcsec_to_Mm(arcsec: float, distanceAU: float = 1., center_distance: bool = True) -> float:
@@ -729,7 +773,14 @@ def add_unit_to_names(all_quantity_names: np.ndarray, order: str | None = None,
     return names
 
 
-def rot_coordinates_to_NW(longitude: np.ndarray, latitude: np.ndarray, array_to_flip: np.ndarray) -> np.ndarray:
+def rot_coordinates_to_NW(longitude: np.ndarray, latitude: np.ndarray, array_to_flip: np.ndarray,
+                          lon_index: int | None = None, lat_index: int | None = None) -> np.ndarray:
+
+    if lon_index is None:
+        lon_index = 1 if np.ndim(array_to_flip) > 2 else 0
+    if lat_index is None:
+        lat_index = 2 if np.ndim(array_to_flip) > 2 else 1
+
     nr, _ = np.shape(longitude)
     linear_lon = longitude[nr // 2, :]
     linear_lon = linear_lon[np.isfinite(linear_lon)]
@@ -741,9 +792,9 @@ def rot_coordinates_to_NW(longitude: np.ndarray, latitude: np.ndarray, array_to_
     # axes along which to flip the map
     axes = []
     if linear_lon[0] > linear_lon[-1]:
-        axes.append(1)
+        axes.append(lon_index)
     if linear_lat[0] > linear_lat[-1]:
-        axes.append(2)
+        axes.append(lat_index)
 
     return np.flip(m=array_to_flip, axis=axes)
 
@@ -963,7 +1014,7 @@ def hmi_psf(target_shape: tuple[int, int] | int = 65, calc_new: bool = False) ->
         psf = np.real(fftshift(ifft2(unsharp_fft / shart_fft)))
         psf /= np.sum(psf)
 
-        check_dir(hmi_psf_file)
+        check_dir(hmi_psf_file, is_file=True)
         with open(hmi_psf_file, "wb") as f:
             np.savez_compressed(f, HMI_PSF=psf)
 
@@ -990,7 +1041,7 @@ def hmi_noise_old(calc_new: bool = False) -> tuple[np.ndarray, ...]:
         noise_t = hmi_ptr[1, 177:245, 123:230]
         noise_r = hmi_ptr[2, 177:245, 123:230]
 
-        check_dir(hmi_noise_file)
+        check_dir(hmi_noise_file, is_file=True)
         with open(hmi_noise_file, "wb") as f:
             np.savez_compressed(f, HMI_noise_p=noise_p, HMI_noise_t=noise_t, HMI_noise_r=noise_r,
                                 mask=mask, filename=filename)
@@ -1038,7 +1089,7 @@ def hmi_noise(calc_new: bool = False) -> tuple[np.ndarray, ...]:
         # _rows, _cols = np.where(largest_square_mask)
         # noise_sample_final = hmi_ptr[2, _rows.min():_rows.max() + 1, _cols.min():_cols.max() + 1]
 
-        check_dir(hmi_noise_file)
+        check_dir(hmi_noise_file, is_file=True)
         with open(hmi_noise_file, "wb") as f:
             np.savez_compressed(f, HMI_noise_p=noise_p, HMI_noise_t=noise_t, HMI_noise_r=noise_r,
                                 masks=np.array(masks, dtype=object), filenames=filenames)
@@ -1087,7 +1138,9 @@ def fill_header_for_wcs(header):
     Fill in missing keywords and ensure the header is complete for WCS.
     """
     # Handle Hinode/SOT-SP specific header keywords
-    if "RSUN_OBS" not in header.keys():
+    if "RSUN_OBS" not in header:
+        header["RSUN_OBS"] = header["SOLAR_RA"]
+
         if "CRLN_OBS" not in header:
             header["CRLN_OBS"] = 0.0  # Default Carrington longitude, typically 0 for Hinode.
 
@@ -1099,11 +1152,11 @@ def fill_header_for_wcs(header):
 
         # Translate P_ANGLE to CROTA2
         if "CROTA2" not in header and "P_ANGLE" in header:
-            header["CROTA2"] = -header["P_ANGLE"]  # CROTA2 is negative of P_ANGLE
+            header["CROTA2"] = -header["P_ANGLE"]  # p-angle, negative of CROTA2
 
         # Convert center and scale information into the WCS-required format
-        header.setdefault("CRPIX1", header["NAXIS1"] / 2)
-        header.setdefault("CRPIX2", header["NAXIS2"] / 2)
+        header.setdefault("CRPIX1", header["NAXIS1"] / 2. - header["XCEN"] / header["XSCALE"])
+        header.setdefault("CRPIX2", header["NAXIS2"] / 2. - header["YCEN"] / header["YSCALE"])
         header.setdefault("CDELT1", header["XSCALE"])
         header.setdefault("CDELT2", header["YSCALE"])
         header.setdefault("CRVAL1", header["XCEN"])
@@ -1120,21 +1173,28 @@ def fill_header_for_wcs(header):
     return header
 
 
-def read_cotemporal_fits(filename: str, check_uniqueness: bool = False) -> list[str]:
+def read_cotemporal_fits(filename: str, check_uniqueness: bool = False) -> dict:
     fits_folder, fits_name = path.split(filename)
     timestamp = "_".join(fits_name.split("_")[1:3])
     filenames = glob(path.join(fits_folder, f"*{timestamp}*"))
 
+    # Keywords to look for
+    keywords = [".continuum.fits", ".field.fits", ".inclination.fits", ".azimuth.fits", ".disambig.fits"]
+    fits_names = ["ic", "b", "inc", "azi", "disamb"]
+
     if check_uniqueness:
-        if (len([_filename for _filename in filenames if ".field" in _filename]) > 1 or
-            len([_filename for _filename in filenames if ".inclination" in _filename]) > 1 or
-            len([_filename for _filename in filenames if ".azimuth" in _filename]) > 1 or
-            len([_filename for _filename in filenames if ".disambig" in _filename]) > 1 or
-            len([_filename for _filename in filenames if ".continuum" in _filename]) > 1):
+        for keyword in keywords:
+            if sum(keyword in _filename for _filename in filenames) > 1:
+                raise ValueError(f'Fits names are not unique: Multiple files contain the keyword "{keyword}".')
 
-            raise ValueError(f"Fits names are not unique.")
+    # Create the dictionary
+    result_dict = {}
+    for index, keyword in enumerate(keywords):
+        # Find the first string containing the keyword
+        matching_strings = [s for s in filenames if keyword in s]
+        result_dict[f"fits_{fits_names[index]}"] = matching_strings[0] if matching_strings else None
 
-    return filenames
+    return result_dict
 
 
 def return_lonlat(header) -> tuple[np.ndarray, np.ndarray]:
@@ -1176,7 +1236,7 @@ def return_lonlat(header) -> tuple[np.ndarray, np.ndarray]:
     lon = (lon + 360. - crln_obs.to(u.deg).value) % 360.
     lon[lon > 180.] -= 360.  # have if from -180 to +180
 
-    return lon, lat
+    return np.clip(lon, a_min=-90., a_max=90.), np.clip(lat, a_min=-90., a_max=90.)
 
 
 def data_b2ptr(index, bvec: np.ndarray, disambig: np.ndarray | None = None,
@@ -1248,12 +1308,12 @@ def data_b2ptr(index, bvec: np.ndarray, disambig: np.ndarray | None = None,
     return bptr
 
 
-def remove_limb_darkening(data: np.ndarray, thresh: float = 0.6, normalised_thresh: bool = True) -> np.ndarray:
+def remove_limb_darkening_approx(image: np.ndarray, threshold: float = 0.6, normalised_thresh: bool = True) -> np.ndarray:
     # threshold automatically filters out NaNs
     if normalised_thresh:
-        data = data / np.nanmax(data)  # deepcopy
+        image = image / np.nanmax(image)  # deepcopy
 
-    nx, ny = np.shape(data)
+    nx, ny = np.shape(image)
     x, y = np.mgrid[:nx, :ny]
 
     x, y = standardize(np.ravel(x)), standardize(np.ravel(y))
@@ -1262,17 +1322,84 @@ def remove_limb_darkening(data: np.ndarray, thresh: float = 0.6, normalised_thre
     V = np.column_stack((x**2, y**2, x*y, x, y, np.ones_like(x)))
 
     # Compute the pseudo-inverse of the design matrix
-    V_pinv = np.linalg.pinv(V[np.ravel(data) > thresh, :])
+    V_pinv = np.linalg.pinv(V[np.ravel(image) > threshold, :])
 
     # Solve for the coefficients using the pseudo-inverse
-    coefficients = V_pinv @ np.ravel(data)[np.ravel(data) > thresh]
+    coefficients = V_pinv @ np.ravel(image)[np.ravel(image) > threshold]
 
-    return data / np.reshape(V @ coefficients, (nx, ny))
+    return image / np.reshape(V @ coefficients, (nx, ny))
 
 
-def normalize_intensity(image: np.ndarray) -> np.ndarray:
-    # return rescale_intensity(imge=image, thresh=0.9)
-    return remove_limb_darkening(data=image, thresh=0.6, normalised_thresh=True)
+def compute_mu(header) -> np.ndarray:
+    # Fill the header with necessary keywords for WCS
+    header = fill_header_for_wcs(header)
+
+    # Create WCS object directly from the complete header
+    wcs = WCS(header)
+
+    # Get observer location information from the header
+    dsun_obs = header["DSUN_OBS"] * u.m
+    crln_obs = header["CRLN_OBS"] * u.deg
+    crlt_obs = header["CRLT_OBS"] * u.deg
+    obstime = header["DATE-OBS"]
+
+    # Assuming nx and ny are the dimensions of your image:
+    nx, ny = header["NAXIS1"], header["NAXIS2"]
+    x, y = np.meshgrid(np.arange(nx), np.arange(ny))
+
+    # Convert pixel coordinates to world coordinates (Helioprojective)
+    hpc_coords = wcs.pixel_to_world(x, y)
+
+    # Define observer's location in Heliographic Stonyhurst frame
+    observer = SkyCoord(lon=crln_obs, lat=crlt_obs, radius=dsun_obs,
+                        frame=HeliographicStonyhurst, obstime=obstime)
+
+    # Attach observer information to helioprojective coordinates
+    hpc_coords = SkyCoord(hpc_coords.Tx, hpc_coords.Ty,
+                          frame=Helioprojective(observer=observer, obstime=obstime))
+
+    l1 = np.array(hpc_coords.Tx) / header["RSUN_OBS"]
+    l2 = np.array(hpc_coords.Ty) / header["RSUN_OBS"]
+
+    """
+    # Convert longitude and latitude from degrees to radians
+    B0_deg = -header["CRLT_OBS"]
+    longitude_rad = np.deg2rad(longitude_deg)
+    latitude_rad = np.deg2rad(latitude_deg)
+    B0_rad = np.deg2rad(B0_deg)
+
+    # Compute mu = cos(theta)
+    mu = np.cos(latitude_rad) * np.cos(longitude_rad) * np.cos(B0_rad) - np.sin(latitude_rad) * np.sin(B0_rad)
+    mu = np.where(mu > 0., mu, np.nan)
+    """
+
+    return np.sqrt(1. - l1**2 - l2**2)
+
+
+def remove_limb_darkening_exact(image: np.ndarray, header) -> np.ndarray:
+    """
+    Corrects a solar image for limb darkening using an empirical polynomial model.
+
+    Parameters:
+        image (2D array): Observed solar image (e.g., intensity values).
+        header: image header file
+
+    Returns:
+        corrected_image (2D array): Solar image corrected for limb darkening.
+    """
+
+    # Define limb-darkening coefficients
+    ld_coefs = [0.32519, 1.26432, -1.44591, 1.55723, -0.87415, 0.173333]
+    mu = compute_mu(header)
+
+    # Compute the limb-darkening model
+    limb_darkening = sum(c_n * mu ** n for n, c_n in enumerate(ld_coefs))
+    limb_darkening = np.clip(limb_darkening, a_min=_num_eps, a_max=1.)
+
+    # Correct the observed image
+    image = image / limb_darkening.astype(np.result_type(image))
+
+    return image
 
 
 def calculate_contrast(image: np.ndarray) -> float:
@@ -1331,9 +1458,9 @@ def calculate_sharpness_matrics(image: np.ndarray) -> dict:
 
     for metric_name, metric_func in metrics.items():
         result = metric_func(image)
-        print(f"  {metric_name}: {result:.4f}")
+        # print(f"  {metric_name}: {result:.4f}")
         metrics[metric_name] = result
-    print()
+    # print()
 
     return metrics
 

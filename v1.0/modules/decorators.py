@@ -1,5 +1,6 @@
 from functools import wraps
 import time
+import traceback
 from typing import Callable
 
 
@@ -69,3 +70,19 @@ def reduce_like(func: Callable):
     decorated_function.reduce = _decorator
 
     return decorated_function
+
+
+def safe_call(func=None):
+    def _decorator(f: Callable):
+
+        @wraps(f)
+        def wrap(*args, **kw):
+            try:
+                return f(*args, **kw)
+
+            except Exception:
+                print(traceback.format_exc())
+
+        return wrap
+
+    return _decorator(func) if callable(func) else _decorator

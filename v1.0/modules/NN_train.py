@@ -171,7 +171,7 @@ def fit_model(model: Model,
 
 
 def save_model(model: Model, model_filename: str, params: dict | None = None) -> None:
-    check_dir(model_filename)
+    check_dir(model_filename, is_file=True)
 
     if path.isfile(model_filename):
         # Model weights were saved by ModelCheckpoint; restore the best one here
@@ -353,7 +353,7 @@ def hp_tuner(x_train: np.ndarray, y_train: np.ndarray, x_val: np.ndarray, y_val:
 
     # write results to a file
     filename = path.join(directory, f"{project_name}.csv")
-    check_dir(filename)
+    check_dir(filename, is_file=True)
 
     trials = tuner.oracle.get_best_trials(num_trials=max_trials)
     metrics_all = list(trials[0].metrics.get_config()["metrics"].keys())
