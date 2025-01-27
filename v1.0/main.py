@@ -137,13 +137,13 @@ def pipeline(data_filename: str = "SP_HMI-like.npz",
                                         observation_name=set_observation_name(data_filename),
                                         proportiontocut=model_setup["trim_mean_cut"],
                                         subfolder_model=model_setup["model_subdir"])
-
+    """
     results_name = model_name_to_result_name(model_names[0])
     save_results(results_name, predictions, x_true=x_test, y_true=y_test,
                  output_setup=output_setup, grid_setup=grid_setup,
                  filtering_setup=filtering_setup, data_split_setup=data_split_setup,
                  model_setup=model_setup, model_names=model_names, subfolder=model_setup["model_subdir"])
-
+    """
     return predictions
 
 
