@@ -2,7 +2,7 @@ from modules.NN_config import conf_grid_setup
 from modules.utilities_data import (save_data, load_npz, disambigue_azimuth, hmi_psf, data_b2ptr,
                                     remove_limb_darkening_approx, normalise_intensity,
                                     read_cotemporal_fits, convert_unit, hmi_noise, split_data_to_patches)
-from modules.utilities import (rmse, remove_outliers_sliding_window, check_dir, stack, interpolate_mask, remove_nan,
+from modules.utilities import (rmse, remove_outliers_2d, check_dir, stack, interpolate_mask, remove_nan,
                                apply_psf, is_empty, pad_zeros_or_crop, return_mean_std, plot_me, create_circular_mask,
                                filter_fft_amplitude)
 from modules._constants import (_path_sp, _path_hmi, _data_dir,  _rnd_seed, _path_sp_hmi, _observations_name,
@@ -359,7 +359,8 @@ def read_sp(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = "ptr_n
         # filling factor correction for level 2 data
         f = hdu[12].data
         f = np.clip(interpolate_mask(image=f, mask=np.logical_or(f <= 0., f > 1.),
-                                     interp_nans=True, fill_value=_num_eps), _num_eps, 1.)
+                                     interp_nans=True, fill_value=_num_eps),
+                    a_min=_num_eps, a_max=1.)
 
         # https://darts.isas.jaxa.jp/solar/hinode/data/sotsp_level2.html
         # continuum (arb.), |B| (G), B_inclination (deg), B_azimuth (deg)
@@ -697,6 +698,22 @@ def shift_pixels(reference: np.ndarray, image: np.ndarray, align_rules: dict, ma
     return image_shifted
 
 
+def remove_outliers_all(array_iptr: np.ndarray, index_continuum: int, b_threshold: float = 10000.) -> np.ndarray:
+    return np.array([remove_outliers_2d(image=data_part,
+                                        kernel_size=7,
+                                        n_std=3.,
+                                        interp_nans=True,
+                                        maximum_value=None if i == index_continuum else b_threshold
+                                        )
+                     for i, data_part in enumerate(array_iptr)
+                     ])
+
+
+def filter_intensity(intensity: np.ndarray) -> np.ndarray:
+    return np.clip(interpolate_mask(image=intensity, mask=intensity <= 0., interp_nans=True, fill_value=_num_eps),
+                   a_min=_num_eps, a_max=None)
+
+
 def align_SP_file(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = "ptr_native",
                   index_continuum: int = 0, align_rules: dict | None = None,
                   subpixel_shift: bool = False, interpolate_outliers: bool = True,
@@ -721,7 +738,18 @@ def align_SP_file(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
 
     # continuum and B in the given coordinates and G
     sp_iptr = read_sp(SP_filename=SP_filename, coordinates=coordinates)
-    sp_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr[index_continuum]))
+
+    # interpolate outliers but not extrapolate
+    sp_iptr = np.array([interpolate_mask(image=sp_part, mask=None, interp_nans=True, fill_value=np.nan) for sp_part in sp_iptr])
+    sp_iptr, _ = remove_nan(corrupted=sp_iptr, clear=np.ones_like(sp_iptr))
+
+    mask = np.all(np.abs(sp_iptr[1:]) < 500., axis=0)
+    sp_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr[index_continuum],
+                                                                                mask=mask, degree=8))
+
+    if interpolate_outliers:
+        print(f"Outliers are{'' if interpolate_outliers else ' not'} interpolated.")
+        sp_iptr = remove_outliers_all(sp_iptr, index_continuum=index_continuum)
 
     # downscale SP observation to pixel size of HMI (SP and HMI both observe the same box)
     _, _, *hmi_shape = np.shape(hmi_ptr)
@@ -736,20 +764,13 @@ def align_SP_file(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
         hmi_iptr[i], _ = get_hmi_sectors(quantity, SP_filename, hmi_ptr)
 
     sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum])
-    hmi_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(hmi_iptr[index_continuum]))
+    mask = np.all(np.abs(hmi_iptr[1:]) < 500., axis=0)
+    hmi_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(hmi_iptr[index_continuum],
+                                                                                 mask=mask, degree=8))
 
-    sp_iptr[index_continuum] = np.clip(interpolate_mask(image=sp_iptr[index_continuum],
-                                                        mask=sp_iptr[index_continuum] <= 0.,
-                                                        interp_nans=True, fill_value=_num_eps),
-                                       _num_eps, None)
-    sp_iptr_hmilike[index_continuum] = np.clip(interpolate_mask(image=sp_iptr_hmilike[index_continuum],
-                                                                mask=sp_iptr_hmilike[index_continuum] <= 0.,
-                                                                interp_nans=True, fill_value=_num_eps),
-                                                  _num_eps, None)
-    hmi_iptr[index_continuum] = np.clip(interpolate_mask(image=hmi_iptr[index_continuum],
-                                                         mask=hmi_iptr[index_continuum] <= 0.,
-                                                         interp_nans=True, fill_value=_num_eps),
-                                        _num_eps, None)
+    sp_iptr[index_continuum] = filter_intensity(intensity=sp_iptr[index_continuum])
+    sp_iptr_hmilike[index_continuum] = filter_intensity(intensity=sp_iptr_hmilike[index_continuum])
+    hmi_iptr[index_continuum] = filter_intensity(intensity=hmi_iptr[index_continuum])
 
     if control_plots:
         mplbackend = "TkAgg"  # must be done like this to confuse PyInstaller
@@ -791,12 +812,6 @@ def align_SP_file(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
         hmi_iptr = shift_pixels(reference=sp_iptr_hmilike, image=hmi_iptr, align_rules=align_rules)
         _, sp_iptr = remove_nan(corrupted=hmi_iptr, clear=sp_iptr)
         hmi_iptr, sp_iptr_hmilike = remove_nan(corrupted=hmi_iptr, clear=sp_iptr_hmilike)
-
-    if interpolate_outliers:  # remove outliers (slow...)
-        print(f"Outliers are{'' if interpolate_outliers else ' not'} interpolated.")
-        sp_iptr = np.array([remove_outliers_sliding_window(image=data_part, kernel_size=7, n_std=3.) for data_part in sp_iptr])
-        sp_iptr_hmilike = np.array([remove_outliers_sliding_window(image=data_part, kernel_size=7, n_std=3.) for data_part in sp_iptr_hmilike])
-        hmi_iptr = np.array([remove_outliers_sliding_window(image=data_part, kernel_size=7, n_std=3.) for data_part in hmi_iptr])
 
     sp_iptr[index_continuum] = normalise_intensity(sp_iptr[index_continuum])
     sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum])
@@ -856,24 +871,25 @@ def sp_to_hmilike_patches(SP_filename: str, coordinates: Literal["ptr", "ptr_nat
 
     # continuum and B in the given coordinates and G
     sp_iptr = read_sp(SP_filename=SP_filename, coordinates=coordinates)
-    sp_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr[index_continuum]))
 
-    if interpolate_outliers:  # remove outliers (slow...)
+    # interpolate outliers but not extrapolate
+    sp_iptr = np.array([interpolate_mask(image=sp_part, mask=None, interp_nans=True, fill_value=np.nan) for sp_part in sp_iptr])
+    sp_iptr, _ = remove_nan(corrupted=sp_iptr, clear=np.ones_like(sp_iptr))
+
+    mask = np.all(np.abs(sp_iptr[1:]) < 500., axis=0)
+    sp_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr[index_continuum],
+                                                                                mask=mask, degree=8))
+
+    if interpolate_outliers:
         print(f"Outliers are{'' if interpolate_outliers else ' not'} interpolated.")
-        sp_iptr = np.array([remove_outliers_sliding_window(image=data_part, kernel_size=7, n_std=2.) for data_part in sp_iptr])
+        sp_iptr = remove_outliers_all(sp_iptr, index_continuum=index_continuum)
 
     # downscale SP observation to pixel size of HMI (SP and HMI both observe the same box)
     sp_iptr_hmilike = resize_data(data=sp_iptr, final_shape=sp_to_hmi_shape(SP_filename))
     sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum])
 
-    sp_iptr[index_continuum] = np.clip(interpolate_mask(image=sp_iptr[index_continuum],
-                                                        mask=sp_iptr[index_continuum] <= 0.,
-                                                        interp_nans=True, fill_value=_num_eps),
-                                       _num_eps, None)
-    sp_iptr_hmilike[index_continuum] = np.clip(interpolate_mask(image=sp_iptr_hmilike[index_continuum],
-                                                                mask=sp_iptr_hmilike[index_continuum] <= 0.,
-                                                                interp_nans=True, fill_value=_num_eps),
-                                               _num_eps, None)
+    sp_iptr[index_continuum] = filter_intensity(intensity=sp_iptr[index_continuum])
+    sp_iptr_hmilike[index_continuum] = filter_intensity(intensity=sp_iptr_hmilike[index_continuum])
 
     if control_plots:
         mplbackend = "TkAgg"  # must be done like this to confuse PyInstaller
@@ -939,7 +955,10 @@ def sp_to_hmilike_patches(SP_filename: str, coordinates: Literal["ptr", "ptr_nat
               labels=sp_iptr, subfolder=path.join(_path_sp_hmilike, "patches"),
               other_info={f"{_observations_name}_simulated": np.array(sp_iptr_hmilike, dtype=_wp),
                           "units": ["quiet-Sun normalised", "G", "G", "G"],
-                          "direction": [None, "+W", "+S", "-grav"]})
+                          "direction": [None, "+W", "+S", "-grav"],
+                          "patch_size": patch_size,
+                          "cut_edge_px": cut_edge_px,
+                          })
 
     return sp_iptr, sp_iptr_hmilike
 
@@ -961,20 +980,25 @@ def sp_to_hmilike(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
 
     # continuum and B in the given coordinates and G
     sp_iptr = read_sp(SP_filename=SP_filename, coordinates=coordinates)
-    sp_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr[index_continuum]))
+
+    # interpolate outliers but not extrapolate
+    sp_iptr = np.array([interpolate_mask(image=sp_part, mask=None, interp_nans=True, fill_value=np.nan) for sp_part in sp_iptr])
+    sp_iptr, _ = remove_nan(corrupted=sp_iptr, clear=np.ones_like(sp_iptr))
+
+    mask = np.all(np.abs(sp_iptr[1:]) < 500., axis=0)
+    sp_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr[index_continuum],
+                                                                                mask=mask, degree=8))
+
+    if interpolate_outliers:
+        print(f"Outliers are{'' if interpolate_outliers else ' not'} interpolated.")
+        sp_iptr = remove_outliers_all(sp_iptr, index_continuum=index_continuum)
 
     # downscale SP observation to pixel size of HMI (SP and HMI both observe the same box)
     sp_iptr_hmilike = resize_data(data=sp_iptr, final_shape=sp_to_hmi_shape(SP_filename))
     sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum])
 
-    sp_iptr[index_continuum] = np.clip(interpolate_mask(image=sp_iptr[index_continuum],
-                                                        mask=sp_iptr[index_continuum] <= 0.,
-                                                        interp_nans=True, fill_value=_num_eps),
-                                       _num_eps, None)
-    sp_iptr_hmilike[index_continuum] = np.clip(interpolate_mask(image=sp_iptr_hmilike[index_continuum],
-                                                                mask=sp_iptr_hmilike[index_continuum] <= 0.,
-                                                                interp_nans=True, fill_value=_num_eps),
-                                               _num_eps, None)
+    sp_iptr[index_continuum] = filter_intensity(intensity=sp_iptr[index_continuum])
+    sp_iptr_hmilike[index_continuum] = filter_intensity(intensity=sp_iptr_hmilike[index_continuum])
 
     if control_plots:
         mplbackend = "TkAgg"  # must be done like this to confuse PyInstaller
@@ -1001,11 +1025,6 @@ def sp_to_hmilike(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
         for i, ax in enumerate(axes.values()):
             add_subplot(ax[0, 1], sp_iptr_hmilike[i])  # title="HMI like"
             add_subplot(ax[1, 1], sp_iptr[i])  # title="SP original"
-
-    if interpolate_outliers:  # remove outliers (slow...)
-        print(f"Outliers are{'' if interpolate_outliers else ' not'} interpolated.")
-        sp_iptr = np.array([remove_outliers_sliding_window(image=data_part, kernel_size=7, n_std=3.) for data_part in sp_iptr])
-        sp_iptr_hmilike = np.array([remove_outliers_sliding_window(image=data_part, kernel_size=7, n_std=3.) for data_part in sp_iptr_hmilike])
 
     sp_iptr[index_continuum] = normalise_intensity(sp_iptr[index_continuum])
     sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum])
@@ -1102,11 +1121,9 @@ def combine_data_to_patches(data_folder: str, patch_size: int | None = None,
 
         if patched:
             hmi[i], sp_hmi_like[i], sp[i] = data[_observations_name], data[f"{_observations_name}_simulated"], data[_label_name]
-        else:
             if i == 0:
-                print(f"Patch size: {patch_size} px")
-                print(f"Cut edge: {cut_edge_px} px")
-
+                patch_size, cut_edge_px = data["patch_size"], data["cut_edge_px"]
+        else:
             hmi[i], sp_hmi_like[i], sp[i] = split_to_patches(hmi_full=data[_observations_name],
                                                              hmilike_full=data[f"{_observations_name}_simulated"],
                                                              sp_full=data[_label_name],
@@ -1115,6 +1132,9 @@ def combine_data_to_patches(data_folder: str, patch_size: int | None = None,
         data.close()
 
         final_files.extend([{"filename": file, "patch_index": j} for j in range(len(sp[i]))])
+
+    print(f"Patch size: {patch_size} px")
+    print(f"Cut edge: {cut_edge_px} px")
 
     hmi, sp, sp_hmi_like = np.array(stack(hmi, axis=0)), np.array(stack(sp, axis=0)), np.array(stack(sp_hmi_like, axis=0))
     final_files = np.array(final_files, dtype=object)
@@ -1207,9 +1227,10 @@ def pipeline_alignment(skip_jsoc_query: bool = False,
                        output_name: str = "SP_HMI_aligned.npz",
                        control_plots: bool = False,
                        alignment_plots: bool = True,
-                       do_parallel: bool = False) -> None:
+                       file_slice: slice | None = None) -> None:
     print("Registering HMI data to SP")
 
+    if file_slice is None: file_slice = slice(None, None, None)
     if patch_size is None or patch_size <= 0: patch_size = conf_grid_setup["patch_size"]
 
     completeness_check = check_SP_completeness(sp_path=_path_sp)
@@ -1235,9 +1256,10 @@ def pipeline_alignment(skip_jsoc_query: bool = False,
     #
     # HERE SHOULD BE IDL RUN FOR coordinates="ptr_native"
     #
+    
+    SP_filenames = SP_filenames[file_slice]
 
-    def process_file(SP_filename: str) -> None:
-        # necessary function for parallelization
+    for SP_filename in tqdm(SP_filenames):
         try:
             hmi_iptr, sp_iptr, sp_iptr_hmilike = align_SP_file(SP_filename=SP_filename, coordinates=coordinates,
                                                                index_continuum=0, align_rules={0: 0, 1: 0, 2: 0, 3: 0},
@@ -1254,21 +1276,12 @@ def pipeline_alignment(skip_jsoc_query: bool = False,
             # possible missing HMI data due to the drms.exceptions.DrmsExportError:  [status=4]
             print(traceback.format_exc())
 
-    if do_parallel:
-        # !!!
-        # NEFUNGUJE
-        # AttributeError: Can't pickle local object 'pipeline_alignment.<locals>.process_file'
-        max_workers = 4
-        # Choose ThreadPoolExecutor for I/O-bound tasks or ProcessPoolExecutor for CPU-bound tasks
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            list(tqdm(executor.map(process_file, SP_filenames), total=len(SP_filenames)))
+    if file_slice == slice(None, None, None):
+        # you should check the control plots and remove the cubes that are poorly matched or with other artifacts...
+        combine_data_to_patches(data_folder=_path_sp_hmi, patch_size=patch_size, cut_edge_px=cut_edge_px,
+                                output_name=output_name)
     else:
-        for SP_filename in tqdm(SP_filenames):
-            process_file(SP_filename)
-
-    # you should check the control plots and remove the cubes that are poorly matched or with other artifacts...
-    combine_data_to_patches(data_folder=_path_sp_hmi, patch_size=patch_size, cut_edge_px=cut_edge_px,
-                            output_name=output_name)
+        print("Combine the patches after all subprocesses are ready. ")
 
     """
     import matplotlib.animation as animation
@@ -1300,9 +1313,10 @@ def pipeline_sp_to_hmilike(coordinates: Literal["ptr", "ptr_native"] = "ptr_nati
                            output_name: str = "SP_HMI-like.npz",
                            control_plots: bool = False,
                            alignment_plots: bool = True,
-                           do_parallel: bool = False) -> None:
+                           file_slice: slice | None = None) -> None:
     print("Blurring SP data to match HMI's resolution")
 
+    if file_slice is None: file_slice = slice(None, None, None)
     if patch_size is None or patch_size <= 0: patch_size = conf_grid_setup["patch_size"]
 
     completeness_check = check_SP_completeness(sp_path=_path_sp)
@@ -1318,8 +1332,9 @@ def pipeline_sp_to_hmilike(coordinates: Literal["ptr", "ptr_native"] = "ptr_nati
         raise ValueError("Remove SP data with different resolution")
         # remove_sp_data_with_different_resolution(SP_filenames_to_delete=sp_to_delete)
 
-    def process_file(SP_filename: str) -> None:
-        # necessary function for parallelization
+    SP_filenames = SP_filenames[file_slice]
+
+    for SP_filename in tqdm(SP_filenames):
         try:
             sp_iptr, sp_iptr_hmilike = sp_to_hmilike(SP_filename=SP_filename, coordinates=coordinates,
                                                      index_continuum=0, interpolate_outliers=interpolate_outliers,
@@ -1332,21 +1347,12 @@ def pipeline_sp_to_hmilike(coordinates: Literal["ptr", "ptr_native"] = "ptr_nati
             # Handle exceptions and print the traceback
             print(traceback.format_exc())
 
-    if do_parallel:
-        # !!!
-        # NEFUNGUJE
-        # AttributeError: Can't pickle local object 'pipeline_alignment.<locals>.process_file'
-        max_workers = 4
-        # Choose ThreadPoolExecutor for I/O-bound tasks or ProcessPoolExecutor for CPU-bound tasks
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            list(tqdm(executor.map(process_file, SP_filenames), total=len(SP_filenames)))
+    if file_slice == slice(None, None, None):
+        # you should check the control plots and remove the cubes that contain various artifacts...
+        combine_data_to_patches(data_folder=_path_sp_hmilike, patch_size=patch_size, cut_edge_px=cut_edge_px,
+                                output_name=output_name)
     else:
-        for SP_filename in tqdm(SP_filenames):
-            process_file(SP_filename)
-
-    # you should check the control plots and remove the cubes that contain various artifacts...
-    combine_data_to_patches(data_folder=_path_sp_hmilike, patch_size=patch_size, cut_edge_px=cut_edge_px,
-                            output_name=output_name)
+        print("Combine the patches after all subprocesses are ready. ")
 
 
 def pipeline_sp_to_hmilike_v2(coordinates: Literal["ptr", "ptr_native"] = "ptr_native",
@@ -1356,9 +1362,10 @@ def pipeline_sp_to_hmilike_v2(coordinates: Literal["ptr", "ptr_native"] = "ptr_n
                               output_name: str = "SP_HMI-like.npz",
                               control_plots: bool = False,
                               alignment_plots: bool = True,
-                              do_parallel: bool = False) -> None:
+                              file_slice: slice | None = None) -> None:
     print("Blurring SP data to match HMI's resolution and add noise to each patch separately")
 
+    if file_slice is None: file_slice = slice(None, None, None)
     if patch_size is None or patch_size <= 0: patch_size = conf_grid_setup["patch_size"]
 
     completeness_check = check_SP_completeness(sp_path=_path_sp)
@@ -1374,8 +1381,9 @@ def pipeline_sp_to_hmilike_v2(coordinates: Literal["ptr", "ptr_native"] = "ptr_n
         raise ValueError("Remove SP data with different resolution")
         # remove_sp_data_with_different_resolution(SP_filenames_to_delete=sp_to_delete)
 
-    def process_file(SP_filename: str) -> None:
-        # necessary function for parallelization
+    SP_filenames = SP_filenames[file_slice]
+
+    for SP_filename in tqdm(SP_filenames):
         try:
             sp_iptr, sp_iptr_hmilike = sp_to_hmilike_patches(SP_filename=SP_filename,
                                                              coordinates=coordinates,
@@ -1393,10 +1401,11 @@ def pipeline_sp_to_hmilike_v2(coordinates: Literal["ptr", "ptr_native"] = "ptr_n
             # Handle exceptions and print the traceback
             print(traceback.format_exc())
 
-    for SP_filename in tqdm(SP_filenames):
-        process_file(SP_filename)
-
-    combine_data_to_patches(data_folder=path.join(_path_sp_hmilike, "patches"), output_name=output_name)
+    if file_slice == slice(None, None, None):
+        # you should check the control plots and remove the cubes that contain various artifacts...
+        combine_data_to_patches(data_folder=path.join(_path_sp_hmilike, "patches"), output_name=output_name)
+    else:
+        print("Combine the patches after all subprocesses are ready. ")
 
 
 if __name__ == "__main__":
@@ -1411,11 +1420,11 @@ if __name__ == "__main__":
                            cut_edge_px=8,
                            control_plots=False,
                            alignment_plots=False,
-                           do_parallel=False)
+                           file_slice=None)
     else:
         pipeline_sp_to_hmilike_v2(coordinates="ptr_native",
                                   interpolate_outliers=True,
                                   cut_edge_px=8,
                                   control_plots=False,
                                   alignment_plots=False,
-                                  do_parallel=False)
+                                  file_slice=None)

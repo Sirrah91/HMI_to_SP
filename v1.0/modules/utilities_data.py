@@ -1,7 +1,7 @@
 from modules.NN_config_parse import bin_to_used
 from modules.utilities import (check_dir, safe_arange, is_empty, stack, check_file, split_path, make_video_from_arrays,
                                make_video_from_images, concatenate_videos, remove_if_exists, standardize, update_dict,
-                               robust_load_weights, interpolate_outliers_median, pad_zeros_or_crop, return_mean_std)
+                               robust_load_weights, remove_outliers_2d, pad_zeros_or_crop, return_mean_std)
 
 from modules._constants import (_path_data, _path_model, _model_suffix, _wp, _observations_key_name, _label_true_name,
                                 _label_name, _sep_out, _path_hmi, _observations_name, _config_name, _result_dir, _quiet,
@@ -16,9 +16,11 @@ from modules.NN_config import (conf_output_setup, conf_filtering_setup, conf_gri
 
 from os import path
 import os
+import gc
 from typing import Literal
 import numpy as np
 import pandas as pd
+from scipy.sparse.linalg import lsmr
 from scipy.fft import fft2, ifft2, fftshift
 import scipy.io as sio
 from tensorflow.keras.models import load_model, Model
@@ -251,6 +253,7 @@ def load_keras_model(filename: str, input_shape: tuple[int, ...], subfolder: str
     used_quantities = gimme_used_from_name(filename)
 
     default_params = conf_model_setup["params"]  # default (if some keywords are missing in params)
+    adjust_params = True  # if not stored in weights
 
     if params is None:
         try:  # if params are stored in weights file, update the params
@@ -261,6 +264,7 @@ def load_keras_model(filename: str, input_shape: tuple[int, ...], subfolder: str
                     params = update_dict(new_dict=ast.literal_eval(f["params"][()].decode()), base_dict=default_params)
                 else:
                     raise KeyError("Unknown params.")
+            adjust_params = False
             if not quiet:
                 print("Loading params from the weight file.")
 
@@ -272,8 +276,10 @@ def load_keras_model(filename: str, input_shape: tuple[int, ...], subfolder: str
     else:
         params = update_dict(new_dict=params, base_dict=default_params)  # update the defaults
 
-    # adjust params based on the architecture
-    params = adjust_params_from_weights(filename=filename, params=params, subfolder=subfolder)
+    if adjust_params:  # if not stored in weights
+        # adjust params based on the architecture
+        params = adjust_params_from_weights(filename=filename, params=params, subfolder=subfolder)
+
     metrics = params["metrics"] if "metrics" in params else None
 
     model = build_model(input_shape=input_shape, params=params, used_quantities=used_quantities,
@@ -356,7 +362,7 @@ def prepare_hmi_data(fits_ic: str | None = None,
                      to_col: int | None = None,
                      remove_limb_dark: bool = True,
                      disambiguate: bool = True,
-                     interpolate_outliers: bool = True
+                     interpolate_outliers: bool = False,
                      ) -> tuple[np.ndarray, ...]:
     from modules.align_data import calc_hmi_to_sp_resolution
 
@@ -388,6 +394,8 @@ def prepare_hmi_data(fits_ic: str | None = None,
             process_fn = lambda image, header: crop_data(image)
 
         ic = read_and_process_fits(fits_file, dtype=_wp, process_fn=process_fn)
+        if interpolate_outliers:
+            ic = remove_outliers_2d(ic, kernel_size=7, n_std=3., interp_nans=True, maximum_value=None)
         ic = resize_data(ic)
         return normalise_intensity(ic, threshold=0.8)[np.newaxis, ..., np.newaxis]
 
@@ -421,7 +429,7 @@ def prepare_hmi_data(fits_ic: str | None = None,
         for i, data_part in enumerate(bvec):
             data_part = crop_data(data_part)  # Crop after `data_b2ptr`
             if interpolate_outliers:
-                data_part = interpolate_outliers_median(data_part, kernel_size=3, threshold_type="amplitude", threshold=10000.)
+                data_part = remove_outliers_2d(data_part, kernel_size=7, n_std=3., interp_nans=True, maximum_value=10000.)
             bvec[i] = resize_data(data_part)
         return np.transpose(bvec, axes=(1, 2, 0)).astype(_wp)[np.newaxis, ...]
 
@@ -966,7 +974,6 @@ def hmi_psf(target_shape: tuple[int, int] | int = 65, calc_new: bool = False) ->
     hmi_psf_file = "/nfsscratch/david/NN/data/datasets/HMI_PSF.npz"
 
     if calc_new or not path.isfile(hmi_psf_file):
-        # if quantity == "Ic":
         file_orig = "/nfsscratch/david/NN/data/SDO_HMI_stat/20100501_190000/hmi.Ic_720s.20100501_190000_TAI.1.continuum.fits"
         file_dcon = "/nfsscratch/david/NN/data/SDO_HMI_stat/20100501_190000/hmi.Ic_720s_dconS.20100501_190000_TAI.1.continuum.fits"
 
@@ -977,7 +984,7 @@ def hmi_psf(target_shape: tuple[int, int] | int = 65, calc_new: bool = False) ->
             sharp = hdu[1].data
             index_sharp = hdu[1].header
 
-        # Observations are in N up, W left
+        # Observations are in N up, W right
         lon, lat = return_lonlat(index_unsharp)
         unsharp = rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=np.expand_dims(unsharp, axis=0))[0]
         lon, lat = return_lonlat(index_sharp)
@@ -986,27 +993,6 @@ def hmi_psf(target_shape: tuple[int, int] | int = 65, calc_new: bool = False) ->
         N = 401
         unsharp = unsharp[2048 - N // 2:2048 + N // 2 + 1, 2048 - N // 2:2048 + N // 2 + 1]
         sharp = sharp[2048 - N // 2:2048 + N // 2 + 1, 2048 - N // 2:2048 + N // 2 + 1]
-
-        """
-        elif quantity in ["Bp", "Bt", "Br"]:
-            file_orig = "/nfsscratch/david/NN/data/SDO_HMI_stat/20131201_190000/hmi.B_720s.20131201_190000_TAI.ptr.sav"
-            file_dcon = "/nfsscratch/david/NN/data/SDO_HMI_stat/20131201_190000/hmi.B_720s_dconS.20131201_190000_TAI.ptr.sav"
-
-            if quantity == "Bp":
-                index = 0
-            elif quantity == "Bt":
-                index = 1
-            else:
-                index = 2
-
-            bptr = sio.readsav(file_orig)
-            unsharp = bptr["bptr"][index, 2682:2745, 2576:2639]
-            bptr = sio.readsav(file_dcon)
-            sharp = bptr["bptr"][index, 2682:2745, 2576:2639]
-
-        else:
-            raise ValueError(f'Quantity must be in ["Ic", "Bp", "Bt", Br"] but is {quantity}')
-        """
 
         unsharp_fft = fft2(unsharp)
         shart_fft = fft2(sharp)
@@ -1028,56 +1014,40 @@ def hmi_psf(target_shape: tuple[int, int] | int = 65, calc_new: bool = False) ->
     return psf_target_shape / np.sum(psf_target_shape)
 
 
-def hmi_noise_old(calc_new: bool = False) -> tuple[np.ndarray, ...]:
-    hmi_noise_file = "/nfsscratch/david/NN/data/datasets/disambiguation_noise.npz"
-
-    if calc_new or not path.isfile(hmi_noise_file):
-        filename = "/nfsscratch/david/NN/data/SDO_HMI/20100618_160006/hmi.b_720s.20100618_150000_TAI.ptr.sav"
-        hmi_ptr = sio.readsav(filename)["bptr"]
-        mask = np.zeros_like(hmi_ptr, dtype=bool)
-        mask[:, 177:245, 123:230] = True
-
-        noise_p = hmi_ptr[0, 177:245, 123:230]
-        noise_t = hmi_ptr[1, 177:245, 123:230]
-        noise_r = hmi_ptr[2, 177:245, 123:230]
-
-        check_dir(hmi_noise_file, is_file=True)
-        with open(hmi_noise_file, "wb") as f:
-            np.savez_compressed(f, HMI_noise_p=noise_p, HMI_noise_t=noise_t, HMI_noise_r=noise_r,
-                                mask=mask, filename=filename)
-
-    else:
-        data = load_npz(hmi_noise_file)
-        noise_p, noise_t, noise_r = data["HMI_noise_p"], data["HMI_noise_t"], data["HMI_noise_r"]
-        data.close()
-
-    return noise_p, noise_t, noise_r
-
-
 def hmi_noise(calc_new: bool = False) -> tuple[np.ndarray, ...]:
     hmi_noise_file = "/nfsscratch/david/NN/data/datasets/HMI_noise.npz"
 
     if calc_new or not path.isfile(hmi_noise_file):
         filename = "/nfsscratch/david/NN/data/SDO_HMI_stat/20100501_190000/hmi.B_720s.20100501_190000_TAI.ptr.sav"
-        hmi_ptr = sio.readsav(filename)["bptr"]
-        noise_sample = hmi_ptr[0, 1810:2610, 1650:2229]
-        noise_p = noise_sample[:579, :]
+        hmi_ptr = sio.readsav(filename)
+        hmi_ptr, lonlat = hmi_ptr["bptr"], hmi_ptr["lonlat"]
+
+        # Observations are in N up, W right
+        hmi_ptr = rot_coordinates_to_NW(longitude=lonlat[0], latitude=lonlat[1], array_to_flip=hmi_ptr)
+
+        noise_sample = hmi_ptr[0, 1486:2286, 1867:2446]
+        noise_p = noise_sample[221:, :]
 
         mask = np.zeros_like(hmi_ptr[0], dtype=bool)
-        mask[1810:2390, 1650:2230] = True
+        mask[1707:2286, 1867:2446] = True
         filenames = [filename]
         masks = [mask]
 
-        noise_sample = hmi_ptr[1, 1820:2455, 1480:2200]
-        noise_t = noise_sample[:, :635]
+        noise_sample = hmi_ptr[1, 1641:2276, 1896:2616]
+        noise_t = noise_sample[:, 85:]
 
         mask = np.zeros_like(hmi_ptr[1], dtype=bool)
-        mask[1820:2455, 1480:2115] = True
+        mask[1641:2276, 1981:2616] = True
         filenames.append(filename)
         masks.append(mask)
 
-        filename = "/nfsscratch/david/NN/data/SDO_HMI_stat/20100618_152400/hmi.b_720s.20100618_152400_TAI.ptr.sav"
-        hmi_ptr = sio.readsav(filename)["bptr"]
+        filename = "/nfsscratch/david/NN/data/SDO_HMI_stat/20100618_160006/hmi.b_720s.20100618_152400_TAI.ptr.sav"
+        hmi_ptr = sio.readsav(filename)
+        hmi_ptr, lonlat = hmi_ptr["bptr"], hmi_ptr["lonlat"]
+
+        # Observations are in N up, W right
+        hmi_ptr = rot_coordinates_to_NW(longitude=lonlat[0], latitude=lonlat[1], array_to_flip=hmi_ptr)
+
         noise_r = hmi_ptr[2, 163:244, 131:212]
 
         mask = np.zeros_like(hmi_ptr[2], dtype=bool)
@@ -1308,26 +1278,76 @@ def data_b2ptr(index, bvec: np.ndarray, disambig: np.ndarray | None = None,
     return bptr
 
 
-def remove_limb_darkening_approx(image: np.ndarray, threshold: float = 0.6, normalised_thresh: bool = True) -> np.ndarray:
-    # threshold automatically filters out NaNs
-    if normalised_thresh:
-        image = image / np.nanmax(image)  # deepcopy
+def remove_limb_darkening_approx(image: np.ndarray,
+                                 degree: int = 8,
+                                 mask: np.ndarray | None = None,
+                                 threshold: float = 0.3,
+                                 normalised_thresh: bool = True) -> np.ndarray:
+    """
+    Removes approximate limb darkening from an input 2D image using a polynomial surface fit.
 
-    nx, ny = np.shape(image)
-    x, y = np.mgrid[:nx, :ny]
+    Parameters:
+        image (np.ndarray): A 2D array representing the image. Must not contain all NaNs.
+        degree (int): A degree of the fitted polynomial surface.
+        mask (np.ndarray | None): A 2D mask to filter the image. If not set, it is computed
+                                  from threshold and normalised_thresh.
+        threshold (float): A value used to mask out low-intensity pixels for fitting.
+                           Only pixels with values above this threshold are used in the fit.
+        normalised_thresh (bool): If True, normalise the image by dividing by its maximum
+                                  (ignoring NaNs) before applying the threshold.
 
-    x, y = standardize(np.ravel(x)), standardize(np.ravel(y))
+    Returns:
+        np.ndarray: The input image divided by the fitted quadratic surface.
 
-    # Design matrix for quadratic surface
-    V = np.column_stack((x**2, y**2, x*y, x, y, np.ones_like(x)))
+    Notes:
+        - The input image is not modified.
+        - The normalisation step does not alter the input image but works on a temporary copy if needed.
+        - The limb darkening approximation uses a design matrix for a polynomial surface:
+          z(x, y) = c0 + c1*y + c2*x + c3*y^2 + c4*x*y + c5*x^2 + ...
 
-    # Compute the pseudo-inverse of the design matrix
-    V_pinv = np.linalg.pinv(V[np.ravel(image) > threshold, :])
+    """
+    nx, ny = image.shape  # Dimensions of the input image
 
-    # Solve for the coefficients using the pseudo-inverse
-    coefficients = V_pinv @ np.ravel(image)[np.ravel(image) > threshold]
+    # Create standardised grid indices for x and y
+    x = np.linspace(-1., 1., nx, dtype=np.float32)  # Standardised x-coordinates
+    y = np.linspace(-1., 1., ny, dtype=np.float32)  # Standardised y-coordinates
+    x, y = np.meshgrid(x, y, indexing="ij")  # Create meshgrid
+    x, y = x.ravel(), y.ravel()  # Flatten x and y into 1D arrays
 
-    return image / np.reshape(V @ coefficients, (nx, ny))
+    # Design matrix for the quadratic surface.
+    # Compute `V` row-by-row to avoid peak memory usage.
+    V = np.empty((len(x), ((degree + 1) * (2 + degree)) // 2), dtype=np.float32)
+
+    index = 0
+    for j in range(degree + 1):  # Iterate over the total degree
+        for k in range(j + 1):  # Iterate over the individual terms x^k * y^(j-k)
+            V[:, index] = x**k * y**(j-k)
+            index += 1
+    V = V[:, :index]  # just in case (e.g. needed if only even degrees are included (radial symmetry forcing)
+
+    # Collect garbage (x and y are small but still of nonzero sizes)
+    del x, y
+    gc.collect()
+
+    max_val = np.nanmax(image)  # Compute maximum value ignoring NaNs
+
+    if mask is None:
+        # Normalise the image if requested, working on a copy
+        if normalised_thresh:
+            # Create a mask to select pixels above the threshold
+            mask = image > threshold * max_val if normalised_thresh else image > threshold
+
+    mask = mask.ravel()
+    image = image / max_val  # Operates on a temporary copy
+
+    # Fit the quadratic surface to the selected pixels using least squares
+    if V[mask, :].size < 2000 * 2000 * 6:
+        coefficients, _, _, _ = np.linalg.lstsq(V[mask, :], image.ravel()[mask], rcond=None)
+    else:
+        coefficients = lsmr(V[mask, :], image.ravel()[mask])[0]
+
+    # Compute the quadratic surface and divide the image by it
+    return image / (V @ coefficients).reshape(nx, ny)
 
 
 def compute_mu(header) -> np.ndarray:
@@ -1463,4 +1483,3 @@ def calculate_sharpness_matrics(image: np.ndarray) -> dict:
     # print()
 
     return metrics
-

@@ -7,9 +7,11 @@ from modules._constants import _num_eps, _rnd_seed
 from os import path
 import os
 import warnings
+import inspect
 from copy import deepcopy
 from pathlib import Path
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 import pandas as pd
 import re
 from pandas.core.common import flatten
@@ -366,7 +368,7 @@ def find_min_difference_pair(num: int) -> tuple[int, int]:
 
 def calc_zscore(array: np.ndarray) -> np.ndarray:
     mu, sigma = return_mean_std(array)
-    return np.abs((array - mu / sigma)) if sigma > 0. else 0.
+    return np.where(sigma > 0., np.abs((array - mu) / sigma), 0.)
 
 
 def interpolate_outliers_median(array: np.ndarray, kernel_size: int = 3, threshold: float = 3.0,
@@ -396,8 +398,8 @@ def interpolate_outliers_median(array: np.ndarray, kernel_size: int = 3, thresho
     return interpolated_data
 
 
-def find_outliers(y: np.ndarray, x: np.ndarray | None = None,
-                  z_thresh: float = 2.5, num_eps: float = _num_eps) -> np.ndarray:
+def find_outliers1D(y: np.ndarray, x: np.ndarray | None = None,
+                    z_thresh: float = 2.5, num_eps: float = _num_eps) -> np.ndarray:
     if x is None: x = np.arange(len(y))
 
     if len(np.unique(x)) != len(x):
@@ -434,9 +436,9 @@ def find_outliers(y: np.ndarray, x: np.ndarray | None = None,
     return np.where(~np.in1d(x, x_iterate))[0]
 
 
-def remove_outliers(y: np.ndarray, x: np.ndarray | None = None,
-                    z_thresh: float = 2.5, num_eps: float = _num_eps) -> np.ndarray | tuple[np.ndarray, ...]:
-    inds_to_remove = find_outliers(y=y, x=x, z_thresh=z_thresh, num_eps=num_eps)
+def remove_outliers1D(y: np.ndarray, x: np.ndarray | None = None,
+                      z_thresh: float = 2.5, num_eps: float = _num_eps) -> np.ndarray | tuple[np.ndarray, ...]:
+    inds_to_remove = find_outliers1D(y=y, x=x, z_thresh=z_thresh, num_eps=num_eps)
 
     if x is None:
         return np.delete(y, inds_to_remove)
@@ -444,25 +446,31 @@ def remove_outliers(y: np.ndarray, x: np.ndarray | None = None,
     return np.delete(y, inds_to_remove), np.delete(x, inds_to_remove)
 
 
-def remove_outliers_sliding_window(image: np.ndarray, kernel_size: int = 7, n_std: float = 3.) -> np.ndarray:
+def remove_outliers_2d(image: np.ndarray,
+                       kernel_size: int = 7,
+                       n_std: float = 3.,
+                       interp_nans: bool = True,
+                       maximum_value: float | None = None) -> np.ndarray:
     kernel = np.ones((kernel_size, kernel_size))
     kernel /= np.sum(kernel)
-    ddof = return_ddof(kernel)
 
-    sliding_mean = sliding_window(image=image, kernel=kernel, func=lambda i, k: np.nanmean(i))
-    sliding_std = sliding_window(image=image, kernel=kernel, func=lambda i, k: np.nanstd(i, ddof=ddof))
+    sliding_mean = sliding_window(image=image, kernel=kernel, func="mean")
+    sliding_std = sliding_window(image=image, kernel=kernel, func="std")
     mask = np.abs(image - sliding_mean) > n_std * sliding_std
 
-    interp_image = interpolate_mask(image, mask, fill_value=np.nan)
+    if maximum_value is not None:
+        mask[np.abs(image) > maximum_value] = True
+
+    interp_image = interpolate_mask(image, mask, interp_nans=interp_nans, fill_value=np.nan)
     interp_image[~np.isfinite(interp_image)] = image[~np.isfinite(interp_image)]
 
     return interp_image
 
 
-def interpolate_outliers(y: np.ndarray, x: np.ndarray | None = None,
-                         z_thresh: float = 2.5, num_eps: float = _num_eps) -> np.ndarray:
+def interpolate_outliers1D(y: np.ndarray, x: np.ndarray | None = None,
+                           z_thresh: float = 2.5, num_eps: float = _num_eps) -> np.ndarray:
     if x is None: x = np.arange(len(y))
-    y_no_out, x_no_out = remove_outliers(y=y, x=x, z_thresh=z_thresh, num_eps=num_eps)
+    y_no_out, x_no_out = remove_outliers1D(y=y, x=x, z_thresh=z_thresh, num_eps=num_eps)
 
     return safe_extrap1d(x=x_no_out, y=y_no_out, x_new=x)
 
@@ -613,6 +621,19 @@ def plot_me(x: np.ndarray | list, *args, backend: str = "TkAgg", fig_axis_tuple=
     return fig, axis
 
 
+def parse_index(index_str: str | None) -> slice:
+    if not index_str:  # Handle None or empty string
+        return slice(None, None, None)
+
+    if ":" in index_str:  # Handle slices
+        parts = [p.strip() for p in index_str.split(":")]
+        return slice(*map(lambda p: int(p) if p else None, parts))
+
+    # Handle single index
+    index = int(index_str)
+    return slice(index, index + 1, None)
+
+
 def crop_nan(image: np.ndarray) -> np.ndarray:
     cols_with_nan = np.all(~np.isfinite(image), axis=0)
     rows_with_nan = np.all(~np.isfinite(image), axis=1)
@@ -650,9 +671,8 @@ def remove_nan(corrupted: np.ndarray, clear: np.ndarray) -> tuple[np.ndarray, ..
     return corrupted, clear
 
 
-def interpolate_mask(image: np.ndarray, mask: np.ndarray | None = None, interp_nans: bool = False,
-                     fill_value: float = 0.) -> np.ndarray:
-    image = 1. * image
+def interpolate_mask(image: np.ndarray, mask: np.ndarray | None = None, interp_nans: bool = True,
+                     fill_value: float = np.nan) -> np.ndarray:
     if mask is None:
         mask = np.zeros(np.shape(image), dtype=bool)
 
@@ -667,6 +687,8 @@ def interpolate_mask(image: np.ndarray, mask: np.ndarray | None = None, interp_n
 
     knonw_x, knonw_y, knonw_v = x[~mask], y[~mask], image[~mask]
     missing_x, missing_y = x[mask], y[mask]
+
+    image = 1. * image
 
     image[missing_y, missing_x] = LinearNDInterpolator((knonw_x, knonw_y), knonw_v, fill_value=fill_value)((missing_x, missing_y))
 
@@ -730,7 +752,7 @@ def timestamp(t: float, prec: int = 3) -> str:
     return f"{np.round(t / 86400., prec):.{prec:d}f} days"  # show days
 
 
-def timeit(_func: Callable, *args, num_repeats: int = 100, return_output: bool = False, **kw):
+def timeit(_func: Callable, *args, num_repeats: int = 1, return_output: bool = False, **kw):
     ts = time()
     for _ in range(num_repeats - 1):
         _func(*args, **kw)
@@ -887,97 +909,69 @@ def cropND(img: np.ndarray, bounding: tuple[int, int]) -> np.ndarray:
     return img[slices]
 
 
-def sliding_window(image: np.ndarray, kernel: np.ndarray, func: str | Callable, mode: str = "same") -> np.ndarray:
-    if not (callable(func) or func in ["conv", "conv2", "min", "max", "median"]):
-        raise ValueError('"func" must be a 2D function or be in ["conv", "conv2", "min", "max", "median"]')
+def accepts_n_params(func, nparams: int):
+    if not callable(func):
+        return False
+    sig = inspect.signature(func)
+    return len(sig.parameters) == nparams
+
+
+def sliding_window(image: np.ndarray, kernel: np.ndarray,
+                   func: Literal["conv2", "min", "max", "median", "mean", "std", "sum"] | callable,
+                   mode: Literal["full", "same", "valid"] = "same") -> np.ndarray:
+    """
+    Optimized sliding window function using NumPy's stride tricks.
+
+    !!!!! func must be computed along axis=(2, 3) !!!!!
+    e.g. func=lambda im, k: np.var(im, axis=(2, 3))
+    """
+    if not (accepts_n_params(func, nparams=2) or func in ["conv2", "min", "max", "median",  "mean", "std", "sum"]):
+        raise ValueError('"func" must be func(image, kernel) or be in ["conv2", "min", "max", "median",  "mean", "std", "sum"]')
     if mode not in ["full", "same", "valid"]:
         raise ValueError('"mode" must be in ["full", "same", "valid"]')
 
-    # needed due to nans
-    image, kernel = np.array(image, dtype=float), np.array(kernel, dtype=float)
+    kernel = np.array(kernel, dtype=float)
+    image = np.array(image, dtype=float)
 
-    # We start by defining some constants, which are required for this code
-    kern_h, kern_w = np.shape(kernel)
-    im_h, im_w = np.shape(image)
+    kern_h, kern_w = kernel.shape
 
-    # full-shape output
-    full_h, full_w = im_h + kern_h - 1, im_w + kern_w - 1
+    if mode == "full":
+        pad_h = (kern_h - 1, kern_h - 1)
+        pad_w = (kern_w - 1, kern_w - 1)
+    elif mode == "same":
+        pad_h = (kern_h // 2, (kern_h - 1) // 2)  # Adjust for even-sized kernels
+        pad_w = (kern_w // 2, (kern_w - 1) // 2)  # Adjust for even-sized kernels
+    else:  # valid
+        pad_h = (0, 0)
+        pad_w = (0, 0)
 
-    # padding to the full shape of a full shape (to cover edges -> valid window in this is full in input image)
-    image_padded = to_shape(image, (full_h + kern_h - 1, full_w + kern_w - 1))
-    pad_im_h, pad_im_w = np.shape(image_padded)
+    # Pad the image
+    image_padded = np.pad(image, (pad_h, pad_w), mode="constant", constant_values=np.nan)
 
-    #
-    # Preparing the indices that split the padded image into sub-images
-    #
+    # Create strided view of the image
+    windows = sliding_window_view(image_padded, window_shape=(kern_h, kern_w))
 
-    # indices in columns (in height); only valid indices in padded image
-    # Shape of filter2 is full_h * kern_h
-    filter1 = np.arange(kern_h) + np.arange(pad_im_h - kern_h + 1)[:, np.newaxis]
-
-    # indices in rows (in width); only valid indices in padded image
-    # Shape of filter1 is full_w x kern_w
-    filter2 = np.arange(kern_w) + np.arange(pad_im_w - kern_w + 1)[:, np.newaxis]
-
-    # splitting the padded image into sub-images
-
-    # intermediate is the stepped data, which has the shape full_h x kern_h x pad_im_w
-    intermediate = image_padded[filter1]
-
-    # transpose the inner dimensions of the intermediate to enact filter2
-    # shape is now full_h x pad_im_w x kern_h
-    intermediate = np.transpose(intermediate, (0, 2, 1))
-
-    # Apply filter2 on the inner data piecewise, resultant shape is full_h x full_w x kern_w x kern_h
-    intermediate = intermediate[:, filter2]
-
-    # transpose inwards again to get a resultant shape of full_h x full_w x kern_h x kern_w
-    intermediate = np.transpose(intermediate, (0, 1, 3, 2))
-
-    if func in ["conv", "conv2"]:
-        result = np.nansum(intermediate * np.rot90(kernel, 2), axis=(2, 3))
-
-        if mode == "same":
-            out_h, out_w = im_h, im_w
-
-        # Matlab-like valid (different from scipy if kernel size > image size; scipy switches them)
-        elif mode == "valid":
-            if kern_h != 0:
-                out_h = np.max(im_h - kern_h + 1, 0)
-            else:
-                out_h = im_h
-            if kern_w != 0:
-                out_w = np.max(im_w - kern_w + 1, 0)
-            else:
-                out_w = im_w
-
-        else:  # full
-            out_h, out_w = full_h, full_w
-
+    # Perform operation
+    if callable(func):
+        result = func(windows, kernel)
+    elif func == "conv2":
+        result = np.nansum(windows * np.rot90(kernel, 2), axis=(2, 3))
+    elif func == "sum":
+        result = np.nansum(windows, axis=(2, 3))
+    elif func == "median":
+        result = np.nanmedian(windows, axis=(2, 3))
+    elif func == "mean":
+        result = np.nanmean(windows, axis=(2, 3))
+    elif func == "std":
+        result = np.nanstd(windows, ddof=return_ddof(kernel), axis=(2, 3))
+    elif func == "max":
+        result = np.nanmax(windows, axis=(2, 3))
+    elif func == "min":
+        result = np.nanmin(windows, axis=(2, 3))
     else:
-        # mode == "same" always if not conv or conv2
-        out_h, out_w = im_h, im_w
+        raise ValueError("Invalid function")
 
-        if callable(func):  # apply the function and crop
-            # general function lambda i, k: func(i, k) -> R
-            result = np.zeros((full_h, full_w))
-            for ix in range(full_h):
-                for iy in range(full_w):
-                    result[ix, iy] = func(intermediate[ix, iy], kernel)
-
-        # Do not apply the function on "filtered-out" data (where kernel <= 0)
-        intermediate = intermediate * np.where(kernel > 0., 1., np.nan)
-
-        if func == "median":
-            result = np.nanmedian(intermediate, axis=(2, 3))
-
-        elif func == "max":
-            result = np.nanmax(intermediate, axis=(2, 3))
-
-        elif func == "min":
-            result = np.nanmin(intermediate, axis=(2, 3))
-
-    return cropND(result, (out_h, out_w))
+    return result
 
 
 def best_blk(num: int, cols_to_rows: float = 4. / 3.) -> tuple[int, int]:

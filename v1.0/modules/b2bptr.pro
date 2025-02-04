@@ -3,7 +3,7 @@
 ; otherwise type .r b2bprt.pro (or .run)
 
 ; Define the parent directory path
-parent_directory = '/nfsscratch/david/NN/data/tmp/'
+parent_directory = '/nfsscratch/david/NN/data/SDO_HMI_stat/'
 
 ; Find all subfolders
 subfolders = FILE_SEARCH(parent_directory + '*')
@@ -38,6 +38,7 @@ for isub = 0, N_ELEMENTS(subfolders) - 1 do begin
         read_sdo, files[3], index, ambig, /uncomp_delete
         hmi_disambig, azi, ambig, 1
         read_sdo, files[0:2], index, data, /uncomp_delete
+        data[*,*,2] = azi
 
         if (N_ELEMENTS(index) GT 0) AND (N_ELEMENTS(index.history) GT 0) THEN BEGIN
             ; Find occurrences of "rotated" in index.history
@@ -45,7 +46,7 @@ for isub = 0, N_ELEMENTS(subfolders) - 1 do begin
 
             ; If "rotated" is found in any element, add 180 to azi
             if (count GT 0) THEN BEGIN
-                data[*,*,2] = azi + 180  ; to compensate the frame rotation done by im_patch
+                data[*,*,2] += 180  ; to compensate the frame rotation done by im_patch
             ENDIF
         ENDIF
 
