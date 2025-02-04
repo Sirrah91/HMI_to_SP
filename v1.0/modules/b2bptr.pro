@@ -9,7 +9,7 @@ parent_directory = '/nfsscratch/david/NN/data/SDO_HMI_stat/'
 subfolders = FILE_SEARCH(parent_directory + '*')
 
 ; Iterate over each subfolder file
-for isub = 0, N_ELEMENTS(subfolders) - 1 do begin
+FOR isub = 0, N_ELEMENTS(subfolders) - 1 do begin
 
     ; Define the folder path
     folder_path = subfolders[isub] + '/'
@@ -18,7 +18,7 @@ for isub = 0, N_ELEMENTS(subfolders) - 1 do begin
     field_files = FILE_SEARCH(folder_path + '*[.]field[.]fits')
 
     ; Iterate over each field file
-    for i = 0, N_ELEMENTS(field_files) - 1 do begin 
+    FOR i = 0, N_ELEMENTS(field_files) - 1 do begin
         ; Extract the base name without the extension
         base_name = FILE_BASENAME(field_files[i])
 
@@ -35,25 +35,44 @@ for isub = 0, N_ELEMENTS(subfolders) - 1 do begin
         files = [field_files[i], incl_file, azimuth_file, disambig_file]
 
         read_sdo, files[2], index, azi, /uncomp_delete
+        rotated_indices = WHERE(STRPOS(index.history, "rotated") NE -1, count_azi)
+
         read_sdo, files[3], index, ambig, /uncomp_delete
-        hmi_disambig, azi, ambig, 1
+        rotated_indices = WHERE(STRPOS(index.history, "rotated") NE -1, count_ambig)
+
+        IF (count_azi EQ count_ambig) THEN BEGIN
+            hmi_disambig, azi, ambig, 1
+        ENDIF ELSE BEGIN
+            ; Print error and skip iteration
+            print, 'Incompatible files: ', files[2:3]
+            GOTO, continue_loop
+        ENDELSE
+
         read_sdo, files[0:2], index, data, /uncomp_delete
         data[*,*,2] = azi
 
-        if (N_ELEMENTS(index) GT 0) AND (N_ELEMENTS(index.history) GT 0) THEN BEGIN
+        IF (N_ELEMENTS(index) GT 0) AND (N_ELEMENTS(index.history) GT 0) THEN BEGIN
             ; Find occurrences of "rotated" in index.history
             rotated_indices = WHERE(STRPOS(index.history, "rotated") NE -1, count)
 
-            ; If "rotated" is found in any element, add 180 to azi
-            if (count GT 0) THEN BEGIN
+            ; If "rotated" is found in all elements, add 180 to azi
+            IF (count EQ 0) THEN BEGIN
+                ; Do nothing (pass)
+            ENDIF ELSE IF (count EQ 3) THEN BEGIN
                 data[*,*,2] += 180  ; to compensate the frame rotation done by im_patch
-            ENDIF
+            ENDIF ELSE BEGIN
+                ; Print error and skip iteration
+                print, 'Incompatible files: ', files[0:2]
+                GOTO, continue_loop
+            ENDELSE
         ENDIF
 
         hmi_b2ptr, index[0], data, bptr, lonlat=lonlat
 
         prefix[3] = 'ptr'
         SAVE, bptr, lonlat, filename=folder_path + STRJOIN(prefix[0:3], '.') + '.sav'
-    endfor
-endfor
+
+        continue_loop:  ; Label for skipping to the next iteration
+    ENDFOR
+ENDFOR
 end
