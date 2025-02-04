@@ -1,4 +1,5 @@
 from modules.align_data import pipeline_sp_to_hmilike, pipeline_alignment, pipeline_sp_to_hmilike_v2
+from modules.utilities import parse_index
 
 import argparse
 import socket
@@ -17,8 +18,11 @@ if __name__ == "__main__":
     parser.add_argument("--cut_edge_px", type=int, default=8)
     parser.add_argument("--patch_size", type=int, default=72)
     parser.add_argument("--output_name", type=str, default="")
+    parser.add_argument("--fileslice", type=str, default=":")
 
     args, _ = parser.parse_known_args()
+
+    args.fileslice = parse_index(args.fileslice)
 
     if args.exact_hmi:
         if not args.output_name:
@@ -32,7 +36,7 @@ if __name__ == "__main__":
                            skip_jsoc_query=False,
                            alignment_plots=False,
                            control_plots=False,
-                           do_parallel=False)
+                           file_slice=args.fileslice)
     else:
         if not args.output_name:
             args.output_name = "SP_HMI-like.npz"
@@ -43,4 +47,4 @@ if __name__ == "__main__":
                                   output_name=args.output_name,
                                   alignment_plots=False,
                                   control_plots=False,
-                                  do_parallel=False)
+                                  file_slice=args.fileslice)
