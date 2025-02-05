@@ -352,7 +352,8 @@ def center_crop_to_patch_size(image: np.ndarray, patch_size: int | None = None):
 
 
 def check_hmi_header(list_of_headers: list) -> bool:
-    return all("history" in index and "rotated" in str(index["history"]) for index in list_of_headers)
+    rotated = np.array(["history" in index and "rotated" in str(index["history"]) for index in list_of_headers])
+    return all(rotated) or all(~rotated)
 
 
 def prepare_hmi_data(fits_ic: str | None = None,
@@ -406,9 +407,10 @@ def prepare_hmi_data(fits_ic: str | None = None,
     def process_vector(fits_b: str, fits_inc: str, fits_azi: str, fits_disamb: str | None) -> np.ndarray:
         print("Processing B vector...")
 
+        index = []
         # Read data one by one to save memory
         with fits.open(fits_b, memmap=True) as hdu:
-            index = hdu[1].header
+            index.append(hdu[1].header)
         with fits.open(fits_inc, memmap=True) as hdu:
             index.append(hdu[1].header)
         with fits.open(fits_azi, memmap=True) as hdu:
