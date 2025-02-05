@@ -1,6 +1,6 @@
 from modules.NN_config import conf_grid_setup
 from modules.utilities_data import (save_data, load_npz, disambigue_azimuth, hmi_psf, data_b2ptr,
-                                    remove_limb_darkening_approx, normalise_intensity,
+                                    remove_limb_darkening_approx, normalise_intensity, check_hmi_header,
                                     read_cotemporal_fits, convert_unit, hmi_noise, split_data_to_patches)
 from modules.utilities import (rmse, remove_outliers_2d, check_dir, stack, interpolate_mask, remove_nan,
                                apply_psf, is_empty, pad_zeros_or_crop, return_mean_std, plot_me, create_circular_mask,
@@ -306,28 +306,34 @@ def read_hmi_B(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = "pt
         field_fits = cotemporal_fits["fits_b"]
         if field_fits is None:
             raise ValueError("(At least) one of field fits is missing. Check your data.")
-        index = fits.getheader(field_fits, 1)
+        index_b = fits.getheader(field_fits, 1)
         b = fits.getdata(field_fits, 1)
 
         inclination_fits = cotemporal_fits["fits_inc"]
         if inclination_fits is None:
             raise ValueError("(At least) one of inclination fits is missing. Check your data.")
+        index_bi = fits.getheader(inclination_fits, 1)
         bi = fits.getdata(inclination_fits, 1)
 
         azimuth_fits = cotemporal_fits["fits_azi"]
         if azimuth_fits is None:
             raise ValueError("(At least) one of azimuth fits is missing. Check your data.")
+        index_bg = fits.getheader(azimuth_fits, 1)
         bg = fits.getdata(azimuth_fits, 1)
 
         disambig_fits = cotemporal_fits["fits_disamb"]
         if disambig_fits is None:
             raise ValueError("(At least) one of disambig fits is missing. Check your data.")
+        index_bgd = fits.getheader(disambig_fits, 1)
         bgd = np.array(fits.getdata(disambig_fits, 1), dtype=int)
 
-        bg = disambigue_azimuth(bg, bgd, method=1,
-                                rotated_image="history" in index and "rotated" in str(index["history"]))
+        if not check_hmi_header([index_b, index_bi, index_bg, index_bgd]):
+            raise ValueError("(At least) one of fits file is not compatible with others.")
 
-        return data_b2ptr(index=index, bvec=np.array([b, bi, bg]))
+        bg = disambigue_azimuth(bg, bgd, method=1,
+                                rotated_image="history" in index_b and "rotated" in str(index_b["history"]))
+
+        return data_b2ptr(index=index_b, bvec=np.array([b, bi, bg]))
 
     # list of all files of one type
     hmi_b = sorted(glob(path.join(_path_hmi, SP_filename.replace(".fits", ""), f"*.field.fits")))

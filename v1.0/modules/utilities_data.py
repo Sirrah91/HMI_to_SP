@@ -351,6 +351,10 @@ def center_crop_to_patch_size(image: np.ndarray, patch_size: int | None = None):
     return cropped_image
 
 
+def check_hmi_header(list_of_headers: list) -> bool:
+    return all("history" in index and "rotated" in str(index["history"]) for index in list_of_headers)
+
+
 def prepare_hmi_data(fits_ic: str | None = None,
                      fits_b: str | None = None,
                      fits_inc: str | None = None,
@@ -399,12 +403,24 @@ def prepare_hmi_data(fits_ic: str | None = None,
         ic = resize_data(ic)
         return normalise_intensity(ic, threshold=0.8)[np.newaxis, ..., np.newaxis]
 
-    def process_vector(fits_b: str, fits_inc: str, fits_azi: str, fits_disamb: str) -> np.ndarray:
+    def process_vector(fits_b: str, fits_inc: str, fits_azi: str, fits_disamb: str | None) -> np.ndarray:
         print("Processing B vector...")
 
         # Read data one by one to save memory
         with fits.open(fits_b, memmap=True) as hdu:
             index = hdu[1].header
+        with fits.open(fits_inc, memmap=True) as hdu:
+            index.append(hdu[1].header)
+        with fits.open(fits_azi, memmap=True) as hdu:
+            index.append(hdu[1].header)
+
+        if disambiguate:
+            with fits.open(fits_disamb, memmap=True) as hdu:
+                index.append(hdu[1].header)
+
+        if not check_hmi_header(index):
+            raise ValueError("(At least) one of fits file is not compatible with others.")
+        index = index[0]
 
         if disambiguate:
             bvec = np.stack([

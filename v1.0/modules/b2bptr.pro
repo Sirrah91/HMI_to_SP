@@ -35,14 +35,15 @@ FOR isub = 0, N_ELEMENTS(subfolders) - 1 do begin
         files = [field_files[i], incl_file, azimuth_file, disambig_file]
 
         read_sdo, files[2], index, azi, /uncomp_delete
-        rotated_indices = WHERE(STRPOS(index.history, "rotated") NE -1, count_azi)
+        count_azi = (STRPOS(index.history, "rotated") NE -1)
 
         read_sdo, files[3], index, ambig, /uncomp_delete
-        rotated_indices = WHERE(STRPOS(index.history, "rotated") NE -1, count_ambig)
+        count_ambig = (STRPOS(index.history, "rotated") NE -1)
 
-        IF (count_azi EQ count_ambig) THEN BEGIN
+        IF (ARRAY_EQUAL(count_azi, count_ambig) AND TOTAL(count_azi) EQ 1) THEN BEGIN
             hmi_disambig, azi, ambig, 1
         ENDIF ELSE BEGIN
+            ; The files are not compatible
             ; Print error and skip iteration
             print, 'Incompatible files: ', files[2:3]
             GOTO, continue_loop
@@ -53,14 +54,23 @@ FOR isub = 0, N_ELEMENTS(subfolders) - 1 do begin
 
         IF (N_ELEMENTS(index) GT 0) AND (N_ELEMENTS(index.history) GT 0) THEN BEGIN
             ; Find occurrences of "rotated" in index.history
-            rotated_indices = WHERE(STRPOS(index.history, "rotated") NE -1, count)
+            count = (STRPOS(index.history, "rotated") NE -1)
 
-            ; If "rotated" is found in all elements, add 180 to azi
-            IF (count EQ 0) THEN BEGIN
+            ; flag == False <=> all indices are the same (TOTAL(count) == 3 <=> 1 in each)
+            result = WHERE((MAX(count, DIMENSION=2) NE MIN(count, DIMENSION=2)), flag)
+
+            IF (flag NE 0) THEN BEGIN
+                ; The files are not compatible
+                ; Print error and skip iteration
+                print, 'Incompatible files: ', files[0:2]
+                GOTO, continue_loop
+            ENDIF ELSE IF (TOTAL(count) EQ 0) THEN BEGIN
                 ; Do nothing (pass)
-            ENDIF ELSE IF (count EQ 3) THEN BEGIN
-                data[*,*,2] += 180  ; to compensate the frame rotation done by im_patch
+            ENDIF ELSE IF (TOTAL(count) EQ 3) THEN BEGIN
+                ; If "rotated" is found in all elements, add 180 to azi
+                data[*,*,2] += 180 ; to compensate the frame rotation done by im_patch
             ENDIF ELSE BEGIN
+                ; The files are not compatible
                 ; Print error and skip iteration
                 print, 'Incompatible files: ', files[0:2]
                 GOTO, continue_loop
