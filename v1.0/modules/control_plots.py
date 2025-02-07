@@ -20,6 +20,7 @@ from modules.NN_config import conf_output_setup
 
 from typing import Literal
 from os import path, listdir
+import shutil
 import numpy as np
 import pandas as pd
 from astropy.io import fits
@@ -52,6 +53,14 @@ def change_params(offset: float, reset: bool = False):
     if reset:
         offset = -offset
 
+    # Check if LaTeX is available
+    if shutil.which("latex"):
+        plt.rc("text", usetex=True)
+        plt.rcParams["text.latex.preamble"] = r"\usepackage{amsmath}"
+        # plt.rc("font", **{"family": "sans-serif", "sans-serif": ["Arial"]})
+    else:
+        plt.rc("text", usetex=False)  # Fallback to default Matplotlib rendering
+
     plt.rc("font", size=TEXT_SIZE + offset)  # controls default text sizes
     plt.rc("axes", titlesize=BIGGER_SIZE + offset)  # fontsize of the axes title
     plt.rc("axes", labelsize=MEDIUM_SIZE + offset)  # fontsize of the x and y labels
@@ -62,10 +71,6 @@ def change_params(offset: float, reset: bool = False):
 
 
 change_params(offset=0.)  # default params
-
-plt.rc("text", usetex=True)
-plt.rcParams["text.latex.preamble"] = r"\usepackage{amsmath}"
-# plt.rc("font", **{"family": "sans-serif", "sans-serif": ["Arial"]})
 
 outdir = _path_figures
 check_dir(outdir)

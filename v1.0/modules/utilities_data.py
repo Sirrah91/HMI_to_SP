@@ -131,8 +131,28 @@ def save_results(final_name: str, y_pred: np.ndarray,
         np.savez_compressed(f, **data_and_metadata)
 
 
-def normalise_intensity(image: np.ndarray, threshold: float = 0.8) -> np.ndarray:
-    return image / np.nanmedian(image[image >= threshold * np.nanmax(image)]).astype(np.result_type(image))
+def quiet_sun_mask(bvec: np.ndarray, threshold: float = 500.) -> np.ndarray:
+    if np.ndim(bvec) == 3:
+        axis = 0
+    else:
+        axis = (0, 3)
+
+    return np.all(np.abs(bvec) < threshold, axis=axis)
+
+
+def normalise_intensity(image: np.ndarray,
+                        threshold: float | tuple[float, float] = (0.6, 0.95),
+                        mask: np.ndarray | None = None) -> np.ndarray:
+    masked_image = 1. * image  # deepcopy
+
+    if mask is not None:
+        masked_image[~mask] = np.nan
+    if isinstance(threshold, float | int):
+        threshold = (float(threshold), 1.)
+    nanmax = np.nanmax(masked_image)
+
+    qs_mask = np.logical_and(threshold[0] * nanmax <= masked_image, masked_image <= threshold[1] * nanmax)
+    return image / np.nanmedian(masked_image[qs_mask]).astype(np.result_type(image))
 
 
 def load_npz(filename: str, subfolder: str = "", list_keys: list[str] | None = None,
@@ -391,7 +411,7 @@ def prepare_hmi_data(fits_ic: str | None = None,
             return data[from_row:to_row, from_col:to_col]
         return data
 
-    def process_intensity(fits_file: str) -> np.ndarray:
+    def process_intensity(fits_file: str, b_mask: np.ndarray | None = None) -> np.ndarray:
         print("Processing Ic...")
         if remove_limb_dark:
             process_fn = lambda image, header: crop_data(remove_limb_darkening_exact(image, header))
@@ -402,7 +422,7 @@ def prepare_hmi_data(fits_ic: str | None = None,
         if interpolate_outliers:
             ic = remove_outliers_2d(ic, kernel_size=7, n_std=3., interp_nans=True, maximum_value=None)
         ic = resize_data(ic)
-        return normalise_intensity(ic, threshold=0.8)[np.newaxis, ..., np.newaxis]
+        return normalise_intensity(ic, threshold=0.6, mask=b_mask)[np.newaxis, ..., np.newaxis]
 
     def process_vector(fits_b: str, fits_inc: str, fits_azi: str, fits_disamb: str | None) -> np.ndarray:
         print("Processing B vector...")
@@ -452,14 +472,15 @@ def prepare_hmi_data(fits_ic: str | None = None,
         return np.transpose(bvec, axes=(1, 2, 0)).astype(_wp)[np.newaxis, ...]
 
     # Process data (overwrite variables to minimise memory use)
-    data = None
+    data, b_mask = None, None
     if None not in [fits_b, fits_inc, fits_azi]:
         if fits_disamb is None and disambiguate:
             raise ValueError("Invalid input: Disambig fits not available.")
 
         data = process_vector(fits_b, fits_inc, fits_azi, fits_disamb)
+        b_mask = quiet_sun_mask(data, threshold=500.)
     if fits_ic:
-        ic = process_intensity(fits_ic)
+        ic = process_intensity(fits_ic, b_mask=b_mask)
         data = ic if data is None else np.concatenate([ic, data], axis=-1)
 
     if data is None:

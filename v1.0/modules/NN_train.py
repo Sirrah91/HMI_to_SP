@@ -102,7 +102,7 @@ def train(x_train: np.ndarray, y_train: np.ndarray, x_val: np.ndarray, y_val: np
         # batch_size to aim for 1 GB
         batch_size = batch_size_estimate(model=model, gb_memory_target=1.)
 
-        print_header()
+        print_header(used_quantities=used_quantities)
         print_info(convert_unit(y_train, initial_unit="kG", final_unit="G", used_quantities=used_quantities),
                    convert_unit(model.predict(x_train, verbose=0, batch_size=batch_size),
                                 initial_unit="kG", final_unit="G",
