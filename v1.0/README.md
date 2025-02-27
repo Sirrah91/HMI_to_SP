@@ -9,7 +9,7 @@
 # Model Evaluation
 
 1. **Load your data** as a 4D numpy array. The expected shape is `(num_observations, num_lat, num_lon, num_quantities)`.
-2. Data can be collected from FITS files using the `prepare_hmi_data` function in `./modules/utilities_data.py`. We note that `prepare_hmi_data` rotates the data such that north is up and west is left.
+2. Data can be collected from FITS files using the `prepare_hmi_data` function in `./modules/utilities_data.py`. We note that `prepare_hmi_data` rotates the data such that north is up and west is right.
 3. We recommend using the `process_patches` function in `./modules/NN_evaluate.py` for evaluation. This function is scalable and allows evaluation of full-disk observations with low memory usage.
 4. **Minimum version**:
    ```python
@@ -27,8 +27,6 @@
    }
 
    # Prepare the data from FITS files
-   # WARNING: This step may result in a large variable 'data' and could cause memory error issues
-   # depending on the size of your input data.
    data = prepare_hmi_data(**hmi_fits)
 
    # Load the used models
