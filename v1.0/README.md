@@ -34,7 +34,33 @@
 
    # Make predictions on the data
    predictions_4d = process_patches(model_names=model_names, image_4d=data)
+   ```
 5. The data are provided at the **Hinode/SOT-SP resolution**, with latitude and longitude steps of `dlat = 0.319978` and `dlon = 0.29714` arcsec per pixel.
+
+# Using `eval_data.py` for Full Workflow
+
+The `eval_data.py` script provides an easy way to evaluate the trained model on HMI FITS data. It simplifies the process of preparing data, running the model, and saving the results. Below is an example of how to use the script:
+
+   ```bash
+   python eval_data.py --data_dir path_to_hmi_fits --output_dir path_to_output_folder --used_quantities iptr --remove_limb_dark --disambiguate --used_B_units G --max_valid_size 256
+   ```
+## Options:
+
+- `--data_dir`: Path to the folder containing raw HMI FITS files (continuum intensity and magnetic field components).
+- `--output_dir`: (Optional) Path to the folder where output FITS files will be saved. If not provided, results will be saved in the input data folder.
+- `--used_quantities`: (Optional) Specifies which quantities to use from the input FITS files. The default is `"iptr"`, which includes intensity and all components of the magnetic field.
+- `--remove_limb_dark`: (Optional) Flag to remove limb darkening from the intensity data.
+- `--disambiguate`: (Optional) Flag to perform azimuthal disambiguation using the disambiguation FITS file in `--data_dir`.
+- `--used_B_units`: (Optional) Specifies the units for the magnetic field. The default is `"G"` (Gauss).
+- `--max_valid_size`: (Optional) Maximum allowed size for the patches to avoid memory issues. The default is `256`, meaning 256x256 pixels. Larger patch sizes may lead to memory overload, so it’s recommended to adjust this parameter based on available system memory.
+
+## Workflow:
+
+1. **Data Preparation**: Uses the `prepare_hmi_data` function to process the raw HMI FITS files. This function resamples the data to Hinode resolution, converts the magnetic field to the local reference frame, and optionally performs other tasks such as removing limb darkening and azimuthal disambiguation.
+2. **Model Evaluation**: The `process_patches` function evaluates the prepared data in manageable patches to avoid memory issues, and performs the deconvolution using the trained model.
+3. **Results Saving**: The output FITS files are saved to the specified directory, containing the deconvolved intensity and magnetic field data with model predictions.
+
+This option provides a streamlined, command-line interface for evaluating the model on new HMI data. For users who prefer more manual control over the workflow, the individual functions can also be called directly as in the **Minimum Version** above.
 
 # Pretrained Models
 
