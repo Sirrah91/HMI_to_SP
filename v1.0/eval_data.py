@@ -68,6 +68,7 @@ def generate_output_filename(filename: str,
 def write_to_fits(predictions: np.ndarray,
                   lon: np.ndarray,
                   lat: np.ndarray,
+                  header,
                   used_quantities: list[bool],
                   b_unit: Literal["kG", "G", "T", "mT"],
                   output_file: str = "output.fits") -> None:
@@ -84,6 +85,7 @@ def write_to_fits(predictions: np.ndarray,
     """
     # Write the primary HDU to initialise the file
     primary_hdu = fits.PrimaryHDU()
+    primary_hdu.header = header
     primary_hdu.writeto(output_file, overwrite=True)  # Overwrite if the file exists
 
     # Metadata for quantities
@@ -218,10 +220,10 @@ def end_to_end_evaluate(data_dir: str,
             fits_dict["fits_azi"] = None
             fits_dict["fits_disamb"] = None
 
-        data, lon, lat = prepare_hmi_data(**fits_dict,
-                                          remove_limb_dark=remove_limb_dark,
-                                          disambiguate=disambiguate,
-                                          interpolate_outliers=False)
+        data, lon, lat, header = prepare_hmi_data(**fits_dict,
+                                                  remove_limb_dark=remove_limb_dark,
+                                                  disambiguate=disambiguate,
+                                                  interpolate_outliers=False)
 
         # Cut data to desired magnetic components
         if used_quantities[0] and any(used_quantities[1:]):  # [..., [ic, bp, bt, br]]
@@ -251,6 +253,7 @@ def end_to_end_evaluate(data_dir: str,
             write_to_fits(predictions=data,
                           lon=lon,
                           lat=lat,
+                          header=header,
                           used_quantities=used_quantities,
                           b_unit=b_unit,
                           output_file=filename_fits)
@@ -272,6 +275,7 @@ def end_to_end_evaluate(data_dir: str,
             write_to_fits(predictions=data,
                           lon=lon,
                           lat=lat,
+                          header=header,
                           used_quantities=used_quantities,
                           b_unit=b_unit,
                           output_file=filename_fits)
