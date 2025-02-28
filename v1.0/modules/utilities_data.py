@@ -346,8 +346,12 @@ def filename_adjustment(filename: str) -> str:
     return f"{split_path(filename)[1]}.npz"
 
 
-def center_crop_to_patch_size(image: np.ndarray, patch_size: int | None = None):
+def center_crop_to_patch_size(image: np.ndarray, patch_size: int | None = None) -> np.ndarray:
     if patch_size is None: patch_size = conf_grid_setup["patch_size"]
+
+    if np.ndim(image) == 2:
+        nx, ny = np.shape(image)
+        image = np.reshape(image, (1, nx, ny, 1))
 
     _, nx, ny, _ = np.shape(image)
 
@@ -388,7 +392,7 @@ def prepare_hmi_data(fits_ic: str | None = None,
                      remove_limb_dark: bool = True,
                      disambiguate: bool = True,
                      interpolate_outliers: bool = False,
-                     ) -> tuple[np.ndarray, ...]:
+                     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, any]:
     from modules.align_data import calc_hmi_to_sp_resolution
 
     hmi_to_sp_rows, hmi_to_sp_cols = calc_hmi_to_sp_resolution(fast=True)
@@ -422,7 +426,7 @@ def prepare_hmi_data(fits_ic: str | None = None,
         if interpolate_outliers:
             ic = remove_outliers_2d(ic, kernel_size=7, n_std=3., interp_nans=True, maximum_value=None)
         ic = resize_data(ic)
-        return normalise_intensity(ic, threshold=0.6, mask=b_mask)[np.newaxis, ..., np.newaxis]
+        return normalise_intensity(ic, threshold=(0.6, 0.95), mask=b_mask)[np.newaxis, ..., np.newaxis]
 
     def process_vector(fits_b: str, fits_inc: str, fits_azi: str, fits_disamb: str | None) -> np.ndarray:
         print("Processing B vector...")
@@ -497,10 +501,10 @@ def prepare_hmi_data(fits_ic: str | None = None,
     data = rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=data)
     lon, lat = rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=[lon, lat])
     lon, lat = resize_data(lon), resize_data(lat)
-    lon, lat = np.clip(lon, a_min=-90., a_max=90.), np.clip(lat, a_min=-90., a_max=90.)
+    lon, lat = np.clip(lon, a_min=-180., a_max=180.), np.clip(lat, a_min=-90., a_max=90.)
 
     # If B is included, Bp: +W, Bt: +S, Br: -grav
-    return data, lon, lat
+    return data, lon, lat, header
 
 
 def arcsec_to_Mm(arcsec: float, distanceAU: float = 1., center_distance: bool = True) -> float:
@@ -765,7 +769,7 @@ def print_header(used_quantities: np.ndarray | None = None) -> None:
     if used_quantities is None: used_quantities = conf_output_setup["used_quantities"]
 
     used_names = add_unit_to_names(quantity_names_short)[used_indices(used_quantities)]
-    print(f"{'':23} {'   '.join(f'{cls:8}' for cls in used_names)}")
+    print(f"{'':18} {'   '.join(f'{cls:8}' for cls in used_names)}")
 
 
 def print_info(y_true: np.ndarray | None, y_pred: np.ndarray | None, which: str = "") -> np.ndarray | None:
@@ -773,10 +777,10 @@ def print_info(y_true: np.ndarray | None, y_pred: np.ndarray | None, which: str 
 
     accuracy = my_rmse(all_to_one=False)(y_true, y_pred).numpy()
     if which:
-        pref = f"Mean {which.lower()} RMSE score:"
+        pref = f"{which.capitalize()} RMSE score:"
     else:
-        pref = f"Mean RMSE score:"
-    print(f"{pref:27} {'     '.join(f'{acc:6.3f}' for acc in np.round(accuracy, 3))}")
+        pref = f"RMSE score:"
+    print(f"{pref:22} {'     '.join(f'{acc:6.3f}' for acc in np.round(accuracy, 3))}")
 
     return accuracy
 
@@ -1146,38 +1150,115 @@ def fill_header_for_wcs(header):
     """
     Fill in missing keywords and ensure the header is complete for WCS.
     """
-    # Handle Hinode/SOT-SP specific header keywords
-    if "RSUN_OBS" not in header:
-        header["RSUN_OBS"] = header["SOLAR_RA"]
+    def try_parse_datetime(date_str: str) -> datetime | None:
+        """
+        Try parsing the date string with multiple formats and return the parsed datetime object.
+        Returns None if parsing fails.
+        """
 
-        if "CRLN_OBS" not in header:
-            header["CRLN_OBS"] = 0.0  # Default Carrington longitude, typically 0 for Hinode.
+        # List of possible date formats
+        formats = [
+            "%Y-%m-%dT%H:%M:%S.%f",  # e.g., 2025-02-13T12:30:45.123456
+            "%Y-%m-%dT%H:%M:%S",  # e.g., 2025-02-13T12:30:45
+            "%Y-%m-%d",  # e.g., 2025-02-13
+            "%d/%m/%Y %H:%M:%S",  # e.g., 13/02/2025 12:30:45
+        ]
 
-        if "CRLT_OBS" not in header:
-            header["CRLT_OBS"] = header["B_ANGLE"]  # Use B_ANGLE for CRLT_OBS.
+        for date_format in formats:
+            try:
+                return datetime.strptime(date_str, date_format)
+            except ValueError:
+                continue
+        return None
 
-        if "DSUN_OBS" not in header:
-            header["DSUN_OBS"] = 1.0 * u.AU.to(u.m)  # Assume distance to Sun is 1 AU.
+    header.setdefault("RSUN_OBS", header.get("SOLAR_RA", 960.))  # In arcsec
+    header.setdefault("DSUN_OBS", 1.0 * u.AU.to(u.m))  # Assume distance to Sun is 1 AU.
 
-        # Translate P_ANGLE to CROTA2
-        if "CROTA2" not in header and "P_ANGLE" in header:
-            header["CROTA2"] = -header["P_ANGLE"]  # p-angle, negative of CROTA2
+    header.setdefault("CRLN_OBS", 0.0)  # Default Carrington longitude
+    header.setdefault("CRLT_OBS", header.get("B_ANGLE", 0.))  # Use B_ANGLE for CRLT_OBS.
 
-        # Convert center and scale information into the WCS-required format
-        header.setdefault("CRPIX1", header["NAXIS1"] / 2. - header["XCEN"] / header["XSCALE"])
-        header.setdefault("CRPIX2", header["NAXIS2"] / 2. - header["YCEN"] / header["YSCALE"])
-        header.setdefault("CDELT1", header["XSCALE"])
-        header.setdefault("CDELT2", header["YSCALE"])
-        header.setdefault("CRVAL1", header["XCEN"])
-        header.setdefault("CRVAL2", header["YCEN"])
-        header.setdefault("CUNIT1", "arcsec")
-        header.setdefault("CUNIT2", "arcsec")
-        header.setdefault("CTYPE1", "HPLN-TAN")
-        header.setdefault("CTYPE2", "HPLT-TAN")
+    header.setdefault("CROTA2", -header.get("P_ANGLE", -0.))  # Translate P_ANGLE to CROTA2
+
+    header.setdefault("CDELT1", header.get("XSCALE", None))  # Pixel scale in arcsec/pixel
+    header.setdefault("CDELT2", header.get("YSCALE", None))  # Pixel scale in arcsec/pixel
+
+    crota2 = np.deg2rad(header["CROTA2"])
+
+    # Set reference point to [0, 0] arcsec by default
+    header.setdefault("CRVAL1", 0.)
+    header.setdefault("CRVAL2", 0.)
+
+    # Convert center and scale information into the WCS-required format
+    # http://jsoc.stanford.edu/doc/keywords/JSOC_Keywords_for_metadata.pdf
+
+    crpix1, crpix2 = None, None
+    # compute crpix1, crpix2
+    if all(k not in header for k in ["CRPIX1", "CRPIX2"]) and all(k in header for k in ["NAXIS1", "NAXIS2", "XCEN", "YCEN"]):
+        # Solved using determinants
+        # a = b * crpix1 + c * crpix2  # XCEN = eq.
+        # A = B * crpix1 + C * crpix2  # YCEN = eq.
+        a = (header["XCEN"] - header["CRVAL1"]
+             - header["CDELT1"] * np.cos(crota2) * (header["NAXIS1"] + 1.) / 2.
+             + header["CDELT2"] * np.sin(crota2) * (header["NAXIS2"] + 1.) / 2.
+             )
+        A = (header["YCEN"] - header["CRVAL2"]
+             - header["CDELT1"] * np.sin(crota2) * (header["NAXIS1"] + 1.) / 2.
+             - header["CDELT2"] * np.cos(crota2) * (header["NAXIS2"] + 1.) / 2.
+             )
+
+        b = -header["CDELT1"] * np.cos(crota2)
+        B = -header["CDELT1"] * np.sin(crota2)
+
+        c = header["CDELT2"] * np.sin(crota2)
+        C = -header["CDELT2"] * np.cos(crota2)
+
+        det_main = b * C - B * c
+        if det_main != 0.:
+            det_crpix1 = a * C - A * c
+            det_crpix2 = b * A - B * a
+            crpix1 = det_crpix1 / det_main
+            crpix2 = det_crpix2 / det_main
+
+    xcen, ycen = None, None
+    # compute xcen, ycen
+    if all(k not in header for k in ["XCEN", "YCEN"]) and all(k in header for k in ["NAXIS1", "NAXIS2", "CRPIX1", "CRPIX2"]):
+        xcen = (header["CRVAL1"]
+                + header["CDELT1"] * np.cos(crota2) * ((header["NAXIS1"] + 1.) / 2. - header["CRPIX1"])
+                - header["CDELT2"] * np.sin(crota2) * ((header["NAXIS2"] + 1.) / 2. - header["CRPIX2"]))
+
+        ycen = (header["CRVAL2"]
+                + header["CDELT1"] * np.sin(crota2) * ((header["NAXIS1"] + 1.) / 2. - header["CRPIX1"])
+                + header["CDELT2"] * np.cos(crota2) * ((header["NAXIS2"] + 1.) / 2. - header["CRPIX2"]))
+
+    header.setdefault("CRPIX1", crpix1)
+    header.setdefault("CRPIX2", crpix2)
+    header.setdefault("XCEN", xcen)
+    header.setdefault("YCEN", ycen)
+
+    # Set default units and types
+    header.setdefault("CUNIT1", "arcsec")
+    header.setdefault("CUNIT2", "arcsec")
+    header.setdefault("CTYPE1", "HPLN-TAN")
+    header.setdefault("CTYPE2", "HPLT-TAN")
 
     # Ensure DATE-OBS or TSTART is available as obstime
-    if "DATE-OBS" not in header:
-        header["DATE-OBS"] = header.get("TSTART")
+    header.setdefault("DATE-OBS", header.get("TSTART", None))
+
+    # Ensure T_OBS is available, using TSTART and TEND
+    t_obs = None  # Default if TSTART and TEND aren't present or parsing fails
+    if "TSTART" in header and "TEND" in header:
+        # Convert to datetime objects
+        tstart = try_parse_datetime(header["TSTART"])
+        tend = try_parse_datetime(header["TEND"])
+
+        if tstart and tend:
+            # Compute T_OBS as the midpoint
+            t_obs = tstart + (tend - tstart) / 2.
+
+            # Convert back to string if needed
+            t_obs = t_obs.strftime("%Y-%m-%dT%H:%M:%S.%f")
+
+    header.setdefault("T_OBS", t_obs)
 
     return header
 
@@ -1217,11 +1298,11 @@ def return_lonlat(header) -> tuple[np.ndarray, np.ndarray]:
     dsun_obs = header["DSUN_OBS"] * u.m
     crln_obs = header["CRLN_OBS"] * u.deg
     crlt_obs = header["CRLT_OBS"] * u.deg
-    obstime = header["DATE-OBS"]
+    obstime = header["T_OBS"]
 
     # Assuming nx and ny are the dimensions of your image:
     nx, ny = header["NAXIS1"], header["NAXIS2"]
-    x, y = np.meshgrid(np.arange(nx), np.arange(ny))
+    y, x = np.indices((ny, nx))
 
     # Convert pixel coordinates to world coordinates (Helioprojective)
     hpc_coords = wcs.pixel_to_world(x, y)
@@ -1241,11 +1322,11 @@ def return_lonlat(header) -> tuple[np.ndarray, np.ndarray]:
     lon = heliographic_coords.lon.to(u.deg).value
     lat = heliographic_coords.lat.to(u.deg).value
 
-    # Apply the correction for the Carrington longitude
+    # Apply the correction for the Carrington longitude; zero longitude in the central meridian
     lon = (lon + 360. - crln_obs.to(u.deg).value) % 360.
     lon[lon > 180.] -= 360.  # have if from -180 to +180
 
-    return np.clip(lon, a_min=-90., a_max=90.), np.clip(lat, a_min=-90., a_max=90.)
+    return lon, lat
 
 
 def data_b2ptr(index, bvec: np.ndarray, disambig: np.ndarray | None = None,
@@ -1318,7 +1399,7 @@ def data_b2ptr(index, bvec: np.ndarray, disambig: np.ndarray | None = None,
 
 
 def remove_limb_darkening_approx(image: np.ndarray,
-                                 degree: int = 8,
+                                 degree: int = 4,
                                  mask: np.ndarray | None = None,
                                  threshold: float = 0.3,
                                  normalised_thresh: bool = True) -> np.ndarray:
@@ -1376,6 +1457,7 @@ def remove_limb_darkening_approx(image: np.ndarray,
             # Create a mask to select pixels above the threshold
             mask = image > threshold * max_val if normalised_thresh else image > threshold
 
+    mask[~np.isfinite(image)] = False
     mask = mask.ravel()
     image = image / max_val  # Operates on a temporary copy
 
@@ -1404,7 +1486,7 @@ def compute_mu(header) -> np.ndarray:
 
     # Assuming nx and ny are the dimensions of your image:
     nx, ny = header["NAXIS1"], header["NAXIS2"]
-    x, y = np.meshgrid(np.arange(nx), np.arange(ny))
+    y, x = np.indices((ny, nx))
 
     # Convert pixel coordinates to world coordinates (Helioprojective)
     hpc_coords = wcs.pixel_to_world(x, y)
@@ -1422,7 +1504,7 @@ def compute_mu(header) -> np.ndarray:
 
     """
     # Convert longitude and latitude from degrees to radians
-    B0_deg = -header["CRLT_OBS"]
+    B0_deg = header["CRLT_OBS"]  # HERE IT GIVES BETTER RESULTS WITH MINUS SIGN. WHY?
     longitude_rad = np.deg2rad(longitude_deg)
     latitude_rad = np.deg2rad(latitude_deg)
     B0_rad = np.deg2rad(B0_deg)
@@ -1432,7 +1514,9 @@ def compute_mu(header) -> np.ndarray:
     mu = np.where(mu > 0., mu, np.nan)
     """
 
-    return np.sqrt(1. - l1**2 - l2**2)
+    # r2 = l1 ** 2 - l2 ** 2
+    # return np.where(r2 <= 1., np.sqrt(1. - r2), np.nan)
+    return np.sqrt(1. - l1**2 - l2**2)  # this is faster
 
 
 def remove_limb_darkening_exact(image: np.ndarray, header) -> np.ndarray:

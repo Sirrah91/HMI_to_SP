@@ -11,7 +11,8 @@ def timing(func=None, num_repeats: int = 1):
     """
     if not (callable(func) or func is None):
         raise ValueError('The usage of timing decorator is "@timing", "@timing()", "@timing(num_repeats=integer)", '
-                         'or "@timing(func=None, num_repeats=integer)"')
+                         '"@timing(func=None, num_repeats=integer)", '
+                         'or timing(func, num_repeats=integer)(*args, **kwargs)')
 
     if num_repeats < 1 or not isinstance(num_repeats, int):
         raise ValueError(f'"num_repeats" must be positive integer but is {num_repeats}')

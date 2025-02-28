@@ -749,13 +749,14 @@ def align_SP_file(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
     sp_iptr = np.array([interpolate_mask(image=sp_part, mask=None, interp_nans=True, fill_value=np.nan) for sp_part in sp_iptr])
     sp_iptr, _ = remove_nan(corrupted=sp_iptr, clear=np.ones_like(sp_iptr))
 
-    mask = quiet_sun_mask(sp_iptr[1:], threshold=500.)
-    sp_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr[index_continuum], mask=mask, degree=8),
-                                                   threshold=0.6, mask=mask)
-
     if interpolate_outliers:
         print(f"Outliers are{'' if interpolate_outliers else ' not'} interpolated.")
         sp_iptr = remove_outliers_all(sp_iptr, index_continuum=index_continuum)
+
+    mask = quiet_sun_mask(sp_iptr[1:], threshold=500.)
+    sp_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr[index_continuum],
+                                                                                mask=mask, degree=4),
+                                                   threshold=(0.6, 0.95), mask=mask)
 
     # downscale SP observation to pixel size of HMI (SP and HMI both observe the same box)
     _, _, *hmi_shape = np.shape(hmi_ptr)
@@ -770,10 +771,10 @@ def align_SP_file(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
         hmi_iptr[i], _ = get_hmi_sectors(quantity, SP_filename, hmi_ptr)
 
     mask = quiet_sun_mask(sp_iptr_hmilike[1:], threshold=500.)
-    sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum], threshold=0.6, mask=mask)
+    sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum], threshold=(0.6, 0.95), mask=mask)
     mask = quiet_sun_mask(hmi_iptr[1:], threshold=500.)
-    hmi_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(hmi_iptr[index_continuum], mask=mask, degree=8),
-                                                    threshold=0.6, mask=mask)
+    hmi_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(hmi_iptr[index_continuum], mask=mask, degree=4),
+                                                    threshold=(0.6, 0.95), mask=mask)
 
     sp_iptr[index_continuum] = filter_intensity(intensity=sp_iptr[index_continuum])
     sp_iptr_hmilike[index_continuum] = filter_intensity(intensity=sp_iptr_hmilike[index_continuum])
@@ -828,11 +829,11 @@ def align_SP_file(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
     """
 
     mask = quiet_sun_mask(sp_iptr[1:], threshold=500.)
-    sp_iptr[index_continuum] = normalise_intensity(sp_iptr[index_continuum], threshold=0.6, mask=mask)
+    sp_iptr[index_continuum] = normalise_intensity(sp_iptr[index_continuum], threshold=(0.6, 0.95), mask=mask)
     mask = quiet_sun_mask(sp_iptr_hmilike[1:], threshold=500.)
-    sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum], threshold=0.6, mask=mask)
+    sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum], threshold=(0.6, 0.95), mask=mask)
     mask = quiet_sun_mask(hmi_iptr[1:], threshold=500.)
-    hmi_iptr[index_continuum] = normalise_intensity(hmi_iptr[index_continuum], threshold=0.6, mask=mask)
+    hmi_iptr[index_continuum] = normalise_intensity(hmi_iptr[index_continuum], threshold=(0.6, 0.95), mask=mask)
 
     if control_plots:
         for i, ax in enumerate(axes.values()):
@@ -886,18 +887,18 @@ def sp_to_hmilike_patches(SP_filename: str, coordinates: Literal["ptr", "ptr_nat
     sp_iptr = np.array([interpolate_mask(image=sp_part, mask=None, interp_nans=True, fill_value=np.nan) for sp_part in sp_iptr])
     sp_iptr, _ = remove_nan(corrupted=sp_iptr, clear=np.ones_like(sp_iptr))
 
-    mask = quiet_sun_mask(sp_iptr[1:], threshold=500.)
-    sp_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr[index_continuum], mask=mask, degree=8),
-                                                   threshold=0.6, mask=mask)
-
     if interpolate_outliers:
         print(f"Outliers are{'' if interpolate_outliers else ' not'} interpolated.")
         sp_iptr = remove_outliers_all(sp_iptr, index_continuum=index_continuum)
 
+    mask = quiet_sun_mask(sp_iptr[1:], threshold=500.)
+    sp_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr[index_continuum], mask=mask, degree=4),
+                                                   threshold=(0.6, 0.95), mask=mask)
+
     # downscale SP observation to pixel size of HMI (SP and HMI both observe the same box)
     sp_iptr_hmilike = resize_data(data=sp_iptr, final_shape=sp_to_hmi_shape(SP_filename))
     mask = quiet_sun_mask(sp_iptr_hmilike[1:], threshold=500.)
-    sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum], threshold=0.6, mask=mask)
+    sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum], threshold=(0.6, 0.95), mask=mask)
 
     sp_iptr[index_continuum] = filter_intensity(intensity=sp_iptr[index_continuum])
     sp_iptr_hmilike[index_continuum] = filter_intensity(intensity=sp_iptr_hmilike[index_continuum])
@@ -923,13 +924,12 @@ def sp_to_hmilike_patches(SP_filename: str, coordinates: Literal["ptr", "ptr_nat
     sp_iptr_hmilike = resize_data(sp_iptr_hmilike, final_shape=np.shape(sp_iptr[0]))
 
     mask = quiet_sun_mask(sp_iptr[1:], threshold=500.)
-    sp_iptr[index_continuum] = normalise_intensity(sp_iptr[index_continuum], threshold=0.6, mask=mask)
+    sp_iptr[index_continuum] = normalise_intensity(sp_iptr[index_continuum], threshold=(0.6, 0.95), mask=mask)
     mask = quiet_sun_mask(sp_iptr_hmilike[1:], threshold=500.)
-    sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum], threshold=0.6, mask=mask)
+    sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum], threshold=(0.6, 0.95), mask=mask)
 
     #
     # HERE MUST BE SPLITTING TO PATCHES
-    # adding noise to B (mostly horizontal to mimic chess-like structure in low-B pixels
     #
     sp_iptr = np.expand_dims(np.transpose(sp_iptr, (1, 2, 0)), axis=0)
     sp_iptr_hmilike = np.expand_dims(np.transpose(sp_iptr_hmilike, (1, 2, 0)), axis=0)
@@ -945,6 +945,7 @@ def sp_to_hmilike_patches(SP_filename: str, coordinates: Literal["ptr", "ptr_nat
             add_subplot(ax[0, 1], sp_iptr_hmilike[0, :, :, i])  # title="HMI like"
             add_subplot(ax[1, 1], sp_iptr[0, :, :, i])  # title="SP original"
 
+    # adding noise to B (mostly horizontal to mimic chess-like structure in low-B pixels
     noise_patch = np.array([create_noise_patch(SP_filename=SP_filename, patch_size=patch_size)
                             for _ in range(len(sp_iptr_hmilike))])
     noise_patch = np.transpose(noise_patch, axes=(0, 2, 3, 1))
@@ -998,18 +999,18 @@ def sp_to_hmilike(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
     sp_iptr = np.array([interpolate_mask(image=sp_part, mask=None, interp_nans=True, fill_value=np.nan) for sp_part in sp_iptr])
     sp_iptr, _ = remove_nan(corrupted=sp_iptr, clear=np.ones_like(sp_iptr))
 
-    mask = quiet_sun_mask(sp_iptr[1:], threshold=500.)
-    sp_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr[index_continuum], mask=mask, degree=8),
-                                                   threshold=0.6, mask=mask)
-
     if interpolate_outliers:
         print(f"Outliers are{'' if interpolate_outliers else ' not'} interpolated.")
         sp_iptr = remove_outliers_all(sp_iptr, index_continuum=index_continuum)
 
+    mask = quiet_sun_mask(sp_iptr[1:], threshold=500.)
+    sp_iptr[index_continuum] = normalise_intensity(remove_limb_darkening_approx(sp_iptr[index_continuum], mask=mask, degree=4),
+                                                   threshold=(0.6, 0.95), mask=mask)
+
     # downscale SP observation to pixel size of HMI (SP and HMI both observe the same box)
     sp_iptr_hmilike = resize_data(data=sp_iptr, final_shape=sp_to_hmi_shape(SP_filename))
     mask = quiet_sun_mask(sp_iptr_hmilike[1:], threshold=500.)
-    sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum], threshold=0.6, mask=mask)
+    sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum], threshold=(0.6, 0.95), mask=mask)
 
     sp_iptr[index_continuum] = filter_intensity(intensity=sp_iptr[index_continuum])
     sp_iptr_hmilike[index_continuum] = filter_intensity(intensity=sp_iptr_hmilike[index_continuum])
@@ -1036,9 +1037,9 @@ def sp_to_hmilike(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = 
     sp_iptr_hmilike = resize_data(sp_iptr_hmilike, final_shape=np.shape(sp_iptr[0]))
 
     mask = quiet_sun_mask(sp_iptr[1:], threshold=500.)
-    sp_iptr[index_continuum] = normalise_intensity(sp_iptr[index_continuum], threshold=0.6, mask=mask)
+    sp_iptr[index_continuum] = normalise_intensity(sp_iptr[index_continuum], threshold=(0.6, 0.95), mask=mask)
     mask = quiet_sun_mask(sp_iptr_hmilike[1:], threshold=500.)
-    sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum], threshold=0.6, mask=mask)
+    sp_iptr_hmilike[index_continuum] = normalise_intensity(sp_iptr_hmilike[index_continuum], threshold=(0.6, 0.95), mask=mask)
 
     if control_plots:
         for i, ax in enumerate(axes.values()):
@@ -1093,11 +1094,11 @@ def split_to_patches(hmi_full: np.ndarray | None,
         hmi_full = np.zeros((0, nr, nc, np.sum(used_quantities)))
 
     hmi_patchs = split_data_to_patches(hmi_full[:, cut_edge_px:nr-cut_edge_px, cut_edge_px:nc-cut_edge_px, :],
-                                       patch_size=patch_size, used_quantities=used_quantities)
+                                       patch_size=patch_size, crop_edges_to_patch=True, used_quantities=used_quantities)
     hmilike_patches = split_data_to_patches(hmilike_full[:, cut_edge_px:nr-cut_edge_px, cut_edge_px:nc-cut_edge_px, :],
-                                            patch_size=patch_size, used_quantities=used_quantities)
+                                            patch_size=patch_size, crop_edges_to_patch=True, used_quantities=used_quantities)
     sp_patches = split_data_to_patches(sp_full[:, cut_edge_px:nr-cut_edge_px, cut_edge_px:nc-cut_edge_px, :],
-                                       patch_size=patch_size, used_quantities=used_quantities)
+                                       patch_size=patch_size, crop_edges_to_patch=True, used_quantities=used_quantities)
 
     return hmi_patchs, hmilike_patches, sp_patches
 
@@ -1178,6 +1179,7 @@ def remove_sp_data_with_different_resolution(SP_filenames_to_delete: np.ndarray)
 
 
 def plot_sp_to_check(SP_filenames: list[str] | None = None,
+                     interpolate_outliers: bool = True,
                      image_start: int = 0,
                      image_num: int | None = None,
                      backend: str = "Agg") -> None:
@@ -1194,6 +1196,7 @@ def plot_sp_to_check(SP_filenames: list[str] | None = None,
     savefig_kwargs = {"bbox_inches": "tight",
                       "pad_inches": 0.05,
                       "dpi": 100}
+    pil_kwargs = {}
 
     for ii in range(image_start, image_start + image_num):
         sp = read_sp(SP_filenames[ii], coordinates="ptr_native")
@@ -1201,10 +1204,18 @@ def plot_sp_to_check(SP_filenames: list[str] | None = None,
         fig, ax = plt.subplots(2, 2, figsize=(16, 12))
         ax = np.ravel(ax)
 
+        # interpolate outliers but not extrapolate
+        sp = np.array([interpolate_mask(image=sp_part, mask=None, interp_nans=True, fill_value=np.nan) for sp_part in sp])
+        sp, _ = remove_nan(corrupted=sp, clear=np.ones_like(sp))
+
+        if interpolate_outliers:
+            sp = remove_outliers_all(sp, index_continuum=0)
+
         mask = quiet_sun_mask(sp[1:], threshold=500.)
         for iax in range(len(ax)):
             if iax == 0:
-                x = normalise_intensity(sp[iax], threshold=0.6, mask=mask)
+                x = normalise_intensity(remove_limb_darkening_approx(sp[iax], mask=mask, degree=4),
+                                        threshold=(0.6, 0.95), mask=mask)
             else:
                 x = sp[iax]
             y_max, x_max = np.shape(x)
@@ -1226,7 +1237,7 @@ def plot_sp_to_check(SP_filenames: list[str] | None = None,
         fig_name = SP_filenames[ii].replace(".fits", ".jpg")
         fig_full_name = path.join(_path_figures, "HMI_to_SOT", "SP_check", fig_name)
         check_dir(fig_full_name, is_file=True)
-        fig.savefig(fig_full_name, format="jpg", **savefig_kwargs)
+        fig.savefig(fig_full_name, format="jpg", **savefig_kwargs, **pil_kwargs)
         plt.close(fig)
 
 
