@@ -30,7 +30,7 @@
    # Prepare the data from FITS files
    data = prepare_hmi_data(**hmi_fits)
 
-   # Load the used models
+   # Select the used models
    model_names = load_base_models("base_models.conf")
 
    # Make predictions on the data
