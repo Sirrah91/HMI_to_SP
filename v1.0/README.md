@@ -76,3 +76,11 @@ The pretrained models are named using a 4-bit binary code, where each bit indica
 - The **fourth bit** represents the radial magnetic field.
 
 For example, a model with a name containing the binary code `1010` would include the continuum intensity and azimuthal magnetic field, but not the zonal or radial fields.
+
+# Compilation
+
+To compile the code into executable binaries that can be run on a cluster, a script `./compile.sh` is provided. This script compiles all necessary source files and prepares the executables. To run the compilation, simply execute 
+
+   ```bash
+   ./compile.sh
+   ```
