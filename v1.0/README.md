@@ -11,7 +11,8 @@
 1. **Load your data** as a 4D numpy array. The expected shape is `(num_observations, num_lat, num_lon, num_quantities)`.
 2. Data can be collected from FITS files using the `prepare_hmi_data` function in `./modules/utilities_data.py`. We note that `prepare_hmi_data` rotates the data such that north is up and west is right.
 3. We recommend using the `process_patches` function in `./modules/NN_evaluate.py` for evaluation. This function is scalable and allows evaluation of full-disk observations with low memory usage.
-4. **Minimum version**:
+
+## Minimum Version
    ```python
    from modules.utilities_data import prepare_hmi_data
    from modules.NN_evaluate import process_patches
@@ -51,7 +52,7 @@ The `eval_data.py` script provides an easy way to evaluate the trained model on 
 - `--used_quantities`: (Optional) Specifies which quantities to use from the input FITS files. The default is `"iptr"`, which includes intensity and all components of the magnetic field.
 - `--remove_limb_dark`: (Optional) Flag to remove limb darkening from the intensity data.
 - `--disambiguate`: (Optional) Flag to perform azimuthal disambiguation using the disambiguation FITS file in `--data_dir`.
-- `--used_B_units`: (Optional) Specifies the units for the magnetic field. The default is `"G"` (Gauss).
+- `--used_B_units`: (Optional) Specifies the units for the magnetic field. The default is `"G"` (Gauss). Other allowed units are `"kG"` (kilogauss), `"T"` (Tesla), and `"mT"` (millitesla).
 - `--max_valid_size`: (Optional) Maximum allowed size for the patches to avoid memory issues. The default is `256`, meaning 256x256 pixels. Larger patch sizes may lead to memory overload, so it’s recommended to adjust this parameter based on available system memory.
 
 ## Workflow:
