@@ -52,7 +52,7 @@ The `eval_data.py` script provides an easy way to evaluate the trained model on 
 - `--used_quantities`: (Optional) Specifies which quantities to use from the input FITS files. The default is `"iptr"`, which includes intensity and all components of the magnetic field.
 - `--remove_limb_dark`: (Optional) Flag to remove limb darkening from the intensity data.
 - `--disambiguate`: (Optional) Flag to perform azimuthal disambiguation using the disambiguation FITS file in `--data_dir`.
-- `--interpolate_outliers`: (Optional) Computes a sliding window z-score and applies linear interpolation to data that are not finite, have magnetic field values above 10 kG, or have local z-scores exceeding 3 sigma. **Note**: This option can be slow due to the interpolation process.
+- `--interpolate_outliers`: (Optional) Computes a sliding window z-score and applies linear interpolation to data that are not finite, have magnetic field values above 10 kG, or have local z-scores exceeding 3 sigma. > *Note: This option can be slow due to the interpolation process.*
 - `--used_B_units`: (Optional) Specifies the units for the magnetic field. The default is `"G"` (Gauss). Other allowed units are `"kG"` (kilogauss), `"T"` (Tesla), and `"mT"` (millitesla).
 - `--max_valid_size`: (Optional) Maximum allowed size for the patches to avoid memory issues. The default is `256`, meaning 256x256 pixels. Larger patch sizes may lead to memory overload, so it’s recommended to adjust this parameter based on available system memory.
 
@@ -79,8 +79,14 @@ For example, a model with a name containing the binary code `1010` would include
 
 # Compilation
 
-To compile the code into executable binaries that can be run on a cluster, a script `./compile.sh` is provided. This script compiles all necessary source files and prepares the executables. To run the compilation, simply execute 
+To compile the code into executable binaries that can be run on a cluster, a script `./compile.sh` is provided. This script compiles all necessary source files and prepares the executables. To run the compilation, follow these steps:
+
+1. Navigate to the project directory.
+2. Run the following command in your terminal:
 
    ```bash
    ./compile.sh
    ```
+3. The script will handle the compilation process and output the binaries in the appropriate directory. Once the compilation is complete, the executables will be ready to run on your cluster.
+
+> *Note: Ensure that the necessary compilers and dependencies are installed before running the script. If you encounter any issues, check the installation requirements or consult the system administrator for support.*
