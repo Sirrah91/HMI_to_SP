@@ -145,7 +145,7 @@ def write_to_fits(predictions: np.ndarray,
             "quantity": "Latitude",
             "unit": "deg",
             "direct": "+N",
-            "WCSNAME": "Stonyhurst",
+            "WCSNAME": "Stonyhurst heliographic",
         },
         {
             "data": lon,
@@ -153,7 +153,7 @@ def write_to_fits(predictions: np.ndarray,
             "quantity": "Longitude",
             "unit": "deg",
             "direct": "+W",
-            "WCSNAME": "Stonyhurst",
+            "WCSNAME": "Stonyhurst heliographic",
         },
     ]
 
@@ -177,6 +177,7 @@ def end_to_end_evaluate(data_dir: str,
                         used_quantities_str: str = "iptr",
                         remove_limb_dark: bool = True,
                         disambiguate: bool = True,
+                        interp_outliers: bool = False,
                         b_unit: Literal["kG", "G", "T", "mT"] = "G",
                         max_valid_size: int = 256,  # px x px
                         ) -> None:
@@ -223,7 +224,7 @@ def end_to_end_evaluate(data_dir: str,
         data, lon, lat, header = prepare_hmi_data(**fits_dict,
                                                   remove_limb_dark=remove_limb_dark,
                                                   disambiguate=disambiguate,
-                                                  interpolate_outliers=False)
+                                                  interpolate_outliers=interp_outliers)
 
         # Cut data to desired magnetic components
         if used_quantities[0] and any(used_quantities[1:]):  # [..., [ic, bp, bt, br]]
@@ -302,10 +303,10 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str)
     parser.add_argument("--output_dir", type=str, default="")
     parser.add_argument("--data_type", type=str, default="auto")
-    parser.add_argument("--used_quantities", type=str, default="ptr")
+    parser.add_argument("--used_quantities", type=str, default="iptr")
     parser.add_argument("--remove_limb_dark", action="store_true")
     parser.add_argument("--disambiguate", action="store_true")
-    parser.add_argument("--fast_interp", action="store_true")
+    parser.add_argument("--interp_outliers", action="store_true")
     parser.add_argument("--used_B_units", type=str, default="G")
     parser.add_argument("--max_valid_size", type=int, default=256)
 
@@ -319,6 +320,7 @@ if __name__ == "__main__":
                         used_quantities_str=args.used_quantities,
                         remove_limb_dark=args.remove_limb_dark,
                         disambiguate=args.disambiguate,
+                        interp_outliers=args.interp_outliers,
                         b_unit=args.used_B_units,
                         max_valid_size=args.max_valid_size,
                         )
