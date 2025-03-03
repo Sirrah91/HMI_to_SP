@@ -7,10 +7,13 @@
 5. Run `./main.py` to initiate the training or retraining process.
 
 # Model Evaluation
-
-1. **Load your data** as a 4D numpy array. The expected shape is `(num_observations, num_lat, num_lon, num_quantities)`.
-2. Data can be collected from FITS files using the `prepare_hmi_data` function in `./modules/utilities_data.py`. The data are interpolated to the **Hinode/SOT-SP resolution**, with latitude and longitude steps of `dlat = 0.31998` and `dlon = 0.29714` arcsec per pixel. Magnetic field components are converted to the local reference frame.  We note that `prepare_hmi_data` rotates the data such that north is up and west is right.
-3. We recommend using the `process_patches` function in `./modules/NN_evaluate.py` for evaluation of the data. This function is scalable and allows evaluation of full-disk observations with low memory usage.
+1. Data can be collected from FITS files using the `prepare_hmi_data` function in `./modules/utilities_data.py`. This function performs the following steps:
+   - a. Magnetic field components are converted to the local reference frame.
+   - b. Continuum observations are corrected for limb darkening and normalised to quiet-Sun level.
+   - c. All observations are interpolated to the **Hinode/SOT-SP resolution**, with latitude and longitude steps of `dlat = 0.31998` and `dlon = 0.29714` arcsec per pixel.
+   - d. Rotates the data such that north is up and west is right.
+   - e. The output data form a 4D numpy array. The shape is `(num_observations, num_lat, num_lon, num_quantities)`.
+2. For data evaluation, we recommend using the `process_patches` function in `./modules/NN_evaluate.py`. This function is scalable and allows evaluation of full-disk observations with low memory usage.
    
 ## Minimum Version
    ```python
