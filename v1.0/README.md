@@ -43,7 +43,7 @@
 The `eval_data.py` script provides an easy way to evaluate the trained model on HMI FITS data. It simplifies the process of preparing data, running the model, and saving the results. Below is an example of how to use the script:
 
    ```bash
-   python eval_data.py --data_dir path_to_hmi_fits --output_dir path_to_output_folder --used_quantities iptr --remove_limb_dark --disambiguate --interpolate_outliers --used_B_units G --max_valid_size 256
+   python eval_data.py --data_dir "${path_to_hmi_fits}" --output_dir "${path_to_output_folder}" --used_quantities iptr --remove_limb_dark --disambiguate --interpolate_outliers --used_B_units G --max_valid_size 256
    ```
 ## Options:
 
