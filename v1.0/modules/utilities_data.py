@@ -14,7 +14,7 @@ from modules.NN_config import quantity_names_short
 from modules.NN_config import (conf_output_setup, conf_filtering_setup, conf_grid_setup, conf_model_setup,
                                conf_data_split_setup)
 
-from os import path
+from os import path, listdir
 import os
 import gc
 from typing import Literal
@@ -26,7 +26,6 @@ import scipy.io as sio
 from tensorflow.keras.models import load_model, Model
 from tensorflow.python.framework.ops import EagerTensor
 from glob import glob
-from datetime import datetime
 import h5py
 import ast
 from astropy.io import fits
@@ -38,6 +37,10 @@ from scipy.special import j1
 from skimage.transform import resize
 from skimage import io, filters, feature, color
 from skimage.restoration import estimate_sigma
+import drms
+import time
+from datetime import datetime, timedelta
+import warnings
 
 
 def save_data(final_name: str, observations: np.ndarray,
@@ -510,6 +513,129 @@ def prepare_hmi_data(fits_ic: str | None = None,
 def arcsec_to_Mm(arcsec: float, distanceAU: float = 1., center_distance: bool = True) -> float:
     fun = np.tan if center_distance else np.sin
     return 2. * u.AU.to(u.Mm, distanceAU) * fun(u.arcsec.to(u.rad, arcsec) / 2.)
+
+
+def jsoc_query(obs_date: str,
+               quantity: str,
+               data_type: Literal["", "dcon", "dconS"] = "",
+               locunits: Literal["arcsec", "pixels", "stony", "carrlong"] = "stony",
+               locref: tuple[float, float] | list[float] | np.ndarray | str = (0., 0.),
+               integration_time_sec: int = 720,
+               total_obs_time_hours: float = 0.,
+               t_ref: str | None = None,
+               boxunits: Literal["pixels", "arcsec", "degrees"] = "pixels",
+               boxsize: tuple[int, int] | list[int] | np.ndarray | int = (512, 512),
+               outdir_prefix: str = "") -> str:
+
+    warnings.filterwarnings("ignore")
+
+    # E-mail registered in JSOC
+    email = "d.korda@seznam.cz"
+
+    if isinstance(boxsize, int):
+        boxsize = (boxsize, boxsize)
+
+    if isinstance(locref, str):
+        if locunits == "stony":
+            locref = str_coordinate_to_tuple(locref)
+        else:
+            locref = ast.literal_eval(locref)
+
+    locref_str = np.array(np.round(locref), dtype=int)
+    if locunits == "stony":
+        tmp = f"N{locref_str[0]:02d}" if locref_str[0] >= 0 else f"S{-locref_str[0]:02d}"
+        locref_str = f"{tmp}W{locref_str[1]:02d}" if locref_str[1] >= 0 else f"{tmp}E{-locref_str[1]:02d}"
+    else:
+        unit = "px" if locunits == "pixels" else "deg"
+        locref_str = f"({';'.join([str(round(loc)) for loc in locref])}){unit}"
+
+    # margin of timespan in minutes
+    margin_frames = 0
+    margin_time = margin_frames * integration_time_sec / 60.
+
+    if "T" not in obs_date:
+        start_obs = f"{obs_date}T00:00:00.000"
+    else:
+        start_obs = obs_date
+        obs_date = obs_date.split("T")[0]
+    start_obs = datetime.strptime(start_obs, "%Y-%m-%dT%H:%M:%S.%f")
+    start_obs -= timedelta(minutes=margin_time)
+
+    end_obs = start_obs + timedelta(hours=total_obs_time_hours, minutes=2*margin_time)
+
+    obs_length = end_obs - start_obs
+    # cannot be (start_obs + end_obs) / 2 because datetime does not support "+" but timedelta does
+    obs_centre = start_obs + obs_length / 2.
+
+    date_str_start = start_obs.strftime("%Y.%m.%d")
+    time_str_start = start_obs.strftime("%H:%M:%S")
+
+    if t_ref is None:
+        date_str_centre = obs_centre.strftime("%Y-%m-%d")  # different format from the start
+        time_str_centre = obs_centre.strftime("%H:%M:%S")
+        t_ref = f"{date_str_centre}T{time_str_centre}"
+    elif "T" not in t_ref:
+        t_ref = f"{t_ref}T00:00:00.000"
+
+    obs_length = int(np.ceil(obs_length.total_seconds() / 3600.))  # in hours
+
+    if data_type:
+        data_type = f"_{data_type}"
+
+    if quantity in ["I", "continuum", "intensity"]:  # Ic data duration@lagImages
+        query_str = f"hmi.Ic_{integration_time_sec}s{data_type}[{date_str_start}_{time_str_start}_TAI/{obs_length}h@{integration_time_sec}s]{{continuum}}"
+    elif quantity in ["B"]:  # magnetic field vector data
+        query_str = f"hmi.B_{integration_time_sec}s{data_type}[{date_str_start}_{time_str_start}_TAI/{obs_length}h@{integration_time_sec}s]{{field,inclination,azimuth,disambig}}"
+    else:  # magnetic field component
+        query_str = f"hmi.B_{integration_time_sec}s{data_type}[{date_str_start}_{time_str_start}_TAI/{obs_length}h@{integration_time_sec}s]{{{quantity}}}"
+    print(f"Data export query:\n\t{query_str}\n")
+
+    process = {"im_patch": {
+        "t_ref": t_ref,
+        # there must be a non-missing image within +- 2 hours of t_ref
+        "t": 0,  # tracking?
+        "r": 0,  # register the images to the first frame?
+        "c": 0,  # cropping?
+        "locunits": locunits,  # units for x and y
+        "x": locref[1],  # center_x in locunits
+        "y": locref[0],  # center_y in locunits
+        "boxunits": boxunits,  # units for width and height
+        "width": boxsize[1],
+        "height": boxsize[0],
+    }}
+
+    print("Submitting export request...")
+    client = drms.Client()
+    result = client.export(
+        query_str,
+        method="url",
+        protocol="fits",
+        email=email,
+        process=process,
+    )
+
+    # Print request URL.
+    print(f"\nRequest URL: {result.request_url}")
+    print(f"{int(len(result.urls))} file(s) available for download.")
+
+    out_dir = path.join(_path_hmi, f"{outdir_prefix}{obs_date.replace('-', '')}{_sep_out}{locref_str}")
+    check_dir(out_dir)
+
+    # Skip existing files.
+    stored_files = listdir(out_dir)
+    new_file_indices = np.where([file not in stored_files for file in result.data["filename"]])[0]
+    print(f"{len(new_file_indices)} file(s) haven't been downloaded yet.\n")
+
+    # Download selected files.
+    result.wait()
+    result.download(out_dir, index=new_file_indices)
+    print("Download finished.")
+    print(f'Download directory:\n\t"{path.abspath(out_dir)}"\n')
+
+    print("Pausing the code for 10 seconds to avoid errors caused by pending requests.\n")
+    time.sleep(10)
+
+    return out_dir
 
 
 def model_name_to_result_name(model_name: str) -> str:
@@ -1034,8 +1160,10 @@ def hmi_psf(target_shape: tuple[int, int] | int = 65, calc_new: bool = False) ->
         sharp = rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=np.expand_dims(sharp, axis=0))[0]
 
         N = 401
-        unsharp = unsharp[2048 - N // 2:2048 + N // 2 + 1, 2048 - N // 2:2048 + N // 2 + 1]
-        sharp = sharp[2048 - N // 2:2048 + N // 2 + 1, 2048 - N // 2:2048 + N // 2 + 1]
+        [nr, nc] = np.shape(unsharp)
+        cen_row, cen_col = nr // 2, nc // 2
+        unsharp = unsharp[cen_row - N // 2:cen_row + N // 2 + 1, cen_col - N // 2:cen_col + N // 2 + 1]
+        sharp = sharp[cen_row - N // 2:cen_row + N // 2 + 1, cen_col - N // 2:cen_col + N // 2 + 1]
 
         unsharp_fft = fft2(unsharp)
         shart_fft = fft2(sharp)

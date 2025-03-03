@@ -42,7 +42,7 @@ hmi_dy_median, hmi_dx_median = 0.504310727, 0.504310727
 sp_dy_median, sp_dx_median = 0.319978, 0.29714
 
 
-def jsoc_query_from_sp_name(SP_filename: str, quantity: str, data_type: Literal["", "_dcon", "_dconS"] = "",
+def jsoc_query_from_sp_name(SP_filename: str, quantity: str, data_type: Literal["", "dcon", "dconS"] = "",
                             integration_time: int | None = None) -> None:
     warnings.filterwarnings("ignore")
 
@@ -75,6 +75,9 @@ def jsoc_query_from_sp_name(SP_filename: str, quantity: str, data_type: Literal[
     time_str_centre = obs_centre.strftime("%H:%M:%S")
 
     obs_length = int(np.ceil(obs_length.total_seconds() / 3600.))  # in hours
+
+    if data_type:
+        data_type = f"_{data_type}"
 
     if quantity in ["I", "continuum", "intensity", "Ic"]:  # Ic data duration@lagImages
         if integration_time is None: integration_time = 45  # in seconds
