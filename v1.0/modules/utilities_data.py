@@ -1393,7 +1393,7 @@ def fill_header_for_wcs(header):
 
 def read_cotemporal_fits(filename: str, check_uniqueness: bool = False) -> dict:
     fits_folder, fits_name = path.split(filename)
-    timestamp = "_".join(fits_name.split("_")[1:3])
+    timestamp = (".".join(fits_name.split(".")[1:3])).partition("_")[-1]
     filenames = glob(path.join(fits_folder, f"*{timestamp}*"))
 
     # Keywords to look for
