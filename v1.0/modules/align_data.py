@@ -47,7 +47,7 @@ def jsoc_query_from_sp_name(SP_filename: str, quantity: str, data_type: Literal[
     warnings.filterwarnings("ignore")
 
     # E-mail registered in JSOC
-    email = "d.korda@seznam.cz"
+    email = "AAA@BBB.CCC"
 
     margin_box = 0.  # margin of box width/height in "boxunits" (0. to keep scale)
     # margin of timespan in minutes
