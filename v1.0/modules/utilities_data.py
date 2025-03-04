@@ -530,7 +530,7 @@ def jsoc_query(obs_date: str,
     warnings.filterwarnings("ignore")
 
     # E-mail registered in JSOC
-    email = "d.korda@seznam.cz"
+    email = "AAA@BBB.CCC"
 
     if isinstance(boxsize, int):
         boxsize = (boxsize, boxsize)
