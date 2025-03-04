@@ -1323,27 +1323,27 @@ def fill_header_for_wcs(header):
     # compute crpix1, crpix2
     if all(k not in header for k in ["CRPIX1", "CRPIX2"]) and all(k in header for k in ["NAXIS1", "NAXIS2", "XCEN", "YCEN"]):
         # Solved using determinants
-        # a = b * crpix1 + c * crpix2  # XCEN = eq.
-        # A = B * crpix1 + C * crpix2  # YCEN = eq.
-        a = (header["XCEN"] - header["CRVAL1"]
-             - header["CDELT1"] * np.cos(crota2) * (header["NAXIS1"] + 1.) / 2.
-             + header["CDELT2"] * np.sin(crota2) * (header["NAXIS2"] + 1.) / 2.
-             )
-        A = (header["YCEN"] - header["CRVAL2"]
-             - header["CDELT1"] * np.sin(crota2) * (header["NAXIS1"] + 1.) / 2.
-             - header["CDELT2"] * np.cos(crota2) * (header["NAXIS2"] + 1.) / 2.
-             )
+        # y1 = a1 * crpix1 + b1 * crpix2  # XCEN = eq.
+        # y2 = a2 * crpix1 + b2 * crpix2  # YCEN = eq.
+        y1 = (header["XCEN"] - header["CRVAL1"]
+              - header["CDELT1"] * np.cos(crota2) * (header["NAXIS1"] + 1.) / 2.
+              + header["CDELT2"] * np.sin(crota2) * (header["NAXIS2"] + 1.) / 2.
+              )
+        y2 = (header["YCEN"] - header["CRVAL2"]
+              - header["CDELT1"] * np.sin(crota2) * (header["NAXIS1"] + 1.) / 2.
+              - header["CDELT2"] * np.cos(crota2) * (header["NAXIS2"] + 1.) / 2.
+              )
 
-        b = -header["CDELT1"] * np.cos(crota2)
-        B = -header["CDELT1"] * np.sin(crota2)
+        a1 = -header["CDELT1"] * np.cos(crota2)
+        a2 = -header["CDELT1"] * np.sin(crota2)
 
-        c = header["CDELT2"] * np.sin(crota2)
-        C = -header["CDELT2"] * np.cos(crota2)
+        b1 = header["CDELT2"] * np.sin(crota2)
+        b2 = -header["CDELT2"] * np.cos(crota2)
 
-        det_main = b * C - B * c
+        det_main = a1 * b2 - a2 * b1
         if det_main != 0.:
-            det_crpix1 = a * C - A * c
-            det_crpix2 = b * A - B * a
+            det_crpix1 = y1 * b2 - y2 * b1
+            det_crpix2 = a1 * y2 - a2 * y1
             crpix1 = det_crpix1 / det_main
             crpix2 = det_crpix2 / det_main
 
