@@ -109,7 +109,7 @@ def plot_quantity_maps(y_pred: np.ndarray, y_true: np.ndarray | None = None, x_t
 
     used_names = add_unit_to_names(quantity_names_short_latex)
     used_names = used_names[used_indices(used_quantities)]
-
+    used_names = [used_names[1], used_names[1]]
     if title_option == "SP":
         used_columns = np.array(["SDO/HMI-like", "Predictions", "Hinode/SOT", r"$\text{Predictions} - \text{Hinode/SOT}$"])
     else:
@@ -203,31 +203,28 @@ def plot_quantity_maps(y_pred: np.ndarray, y_true: np.ndarray | None = None, x_t
                     cbar.ax.set_ylabel(used_names[irow])
 
         """
-        # Bt best
+        # Bp best
         for i in range(4):
             ax[0, i].add_patch(patches.Rectangle((150, 101), 15, 15, linewidth=2, edgecolor="y", facecolor="none", linestyle="-"))
 
         # Bp worst
-        ax[0, 2].add_patch(patches.Rectangle((144, 20), 15, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
-        ax[0, 2].add_patch(patches.Rectangle((144, 20), 15, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
-        ax[0, 2].add_patch(patches.Rectangle((17, 50), 15, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
-        ax[0, 2].add_patch(patches.Rectangle((35, 144), 15, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
-        ax[0, 2].add_patch(patches.Rectangle((115, 150), 20, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
-        ax[0, 2].add_patch(patches.Rectangle((170, 160), 20, 40, angle=55, linewidth=2, edgecolor="b", facecolor="none", linestyle="-"))
+        ax[1, 2].add_patch(patches.Rectangle((144, 20), 15, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
+        ax[1, 2].add_patch(patches.Rectangle((17, 50), 15, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
+        ax[1, 2].add_patch(patches.Rectangle((35, 144), 15, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
+        ax[1, 2].add_patch(patches.Rectangle((115, 150), 20, 15, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
+        ax[1, 2].add_patch(patches.Rectangle((170, 160), 20, 40, angle=55, linewidth=2, edgecolor="b", facecolor="none", linestyle="-"))
         
         # Bt worst
-        ax[0, 2].add_patch(patches.Rectangle((196, 0), 10, 72, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
+        ax[1, 2].add_patch(patches.Rectangle((196, 0), 10, 72, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
         
         # Br best
         for i in range(3):
             ax[0, i].add_patch(patches.Rectangle((175, 89), 35, 50, linewidth=2, edgecolor="y", facecolor="none", linestyle="-"))
-            ax[0, i].add_patch(patches.Rectangle((175, 89), 35, 50, linewidth=2, edgecolor="y", facecolor="none", linestyle="-"))
 
         # Br worst
         for i in range(3):
-            ax[0, i].add_patch(patches.Rectangle((146, 40), 20, 30, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
-            ax[0, i].add_patch(patches.Rectangle((170, 5), 33, 18, linewidth=2, edgecolor="b", facecolor="none", linestyle="-"))
-
+            ax[1, i].add_patch(patches.Rectangle((146, 40), 20, 30, linewidth=2, edgecolor="r", facecolor="none", linestyle="-"))
+            ax[1, i].add_patch(patches.Rectangle((170, 5), 33, 18, linewidth=2, edgecolor="b", facecolor="none", linestyle="-"))
         """
 
         if suptitle is not None:
@@ -988,8 +985,8 @@ def quantity_control_plots(y_true: np.ndarray,
     ax2.tick_params(axis="y")
     ax2.minorticks_off()
 
-    # plt.suptitle(quantity_name.title())
-    ax[1].set_title(quantity_name.title())
+    # plt.suptitle(quantity_name.capitalize())
+    ax[1].set_title(quantity_name.capitalize())
 
     plt.draw()
     fig.tight_layout()
