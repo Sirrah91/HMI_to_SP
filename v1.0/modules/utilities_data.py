@@ -563,6 +563,10 @@ def jsoc_query(obs_date: str,  # "%Y-%m-%d" or "%Y-%m-%dT%H:%M:%S.%f", e.g. "202
         start_obs = obs_date
         obs_date = obs_date.split("T")[0]
     start_obs = parse_datetime(start_obs)
+
+    if start_obs is None:
+        raise ValueError('Invalid date format. Check "parse_datetime" for options.')
+
     start_obs -= timedelta(minutes=margin_time)
 
     end_obs = start_obs + timedelta(hours=total_obs_time_hours, minutes=2*margin_time)
