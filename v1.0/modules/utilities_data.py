@@ -526,6 +526,7 @@ def jsoc_query(obs_date: str,  # see "parse_datetime" for valid formats
                t_ref: str | None = None,
                boxunits: Literal["pixels", "arcsec", "degrees"] = "pixels",
                boxsize: tuple[int, int] | list[int] | np.ndarray | int = (512, 512),
+               outdir: str = _path_hmi,
                outdir_prefix: str = "") -> str:
 
     warnings.filterwarnings("ignore")
@@ -620,24 +621,24 @@ def jsoc_query(obs_date: str,  # see "parse_datetime" for valid formats
     print(f"{int(len(result.urls))} file(s) available for download.")
 
     t_ref = t_ref.split("T")[0]
-    out_dir = path.join(_path_hmi, f"{outdir_prefix}{t_ref.replace('-', '')}{_sep_out}{locref_str}")
-    check_dir(out_dir)
+    outdir = path.join(outdir, f"{outdir_prefix}{t_ref.replace('-', '')}{_sep_out}{locref_str}")
+    check_dir(outdir)
 
     # Skip existing files.
-    stored_files = listdir(out_dir)
+    stored_files = listdir(outdir)
     new_file_indices = np.where([file not in stored_files for file in result.data["filename"]])[0]
     print(f"{len(new_file_indices)} file(s) haven't been downloaded yet.\n")
 
     # Download selected files.
     result.wait()
-    result.download(out_dir, index=new_file_indices)
+    result.download(outdir, index=new_file_indices)
     print("Download finished.")
-    print(f'Download directory:\n\t"{path.abspath(out_dir)}"\n')
+    print(f'Download directory:\n\t"{path.abspath(outdir)}"\n')
 
     print("Pausing the code for 10 seconds to avoid errors caused by pending requests.\n")
     time.sleep(10)
 
-    return out_dir
+    return outdir
 
 
 def model_name_to_result_name(model_name: str) -> str:
