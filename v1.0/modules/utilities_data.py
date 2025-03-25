@@ -515,12 +515,13 @@ def arcsec_to_Mm(arcsec: float, distanceAU: float = 1., center_distance: bool = 
     return 2. * u.AU.to(u.Mm, distanceAU) * fun(u.arcsec.to(u.rad, arcsec) / 2.)
 
 
-def jsoc_query(obs_date: str,
+def jsoc_query(obs_date: str,  # "%Y-%m-%d" or "%Y-%m-%dT%H:%M:%S.%f", e.g. "2020-01-01" or "2020-01-01T12:15:10.012"
                quantity: str,
                data_type: Literal["", "dcon", "dconS"] = "",
                locunits: Literal["arcsec", "pixels", "stony", "carrlong"] = "stony",
                locref: tuple[float, float] | list[float] | np.ndarray | str = (0., 0.),
                integration_time_sec: int = 720,
+               time_step_sec: int | None = None,
                total_obs_time_hours: float = 0.,
                t_ref: str | None = None,
                boxunits: Literal["pixels", "arcsec", "degrees"] = "pixels",
@@ -529,8 +530,11 @@ def jsoc_query(obs_date: str,
 
     warnings.filterwarnings("ignore")
 
+    if time_step_sec is None:
+        time_step_sec = integration_time_sec
+
     # E-mail registered in JSOC
-    email = "AAA@BBB.CCC"
+    email = "d.korda@seznam.cz"
 
     if isinstance(boxsize, int):
         boxsize = (boxsize, boxsize)
@@ -583,11 +587,11 @@ def jsoc_query(obs_date: str,
         data_type = f"_{data_type}"
 
     if quantity in ["I", "continuum", "intensity"]:  # Ic data duration@lagImages
-        query_str = f"hmi.Ic_{integration_time_sec}s{data_type}[{date_str_start}_{time_str_start}_TAI/{obs_length}h@{integration_time_sec}s]{{continuum}}"
+        query_str = f"hmi.Ic_{integration_time_sec}s{data_type}[{date_str_start}_{time_str_start}_TAI/{obs_length}h@{time_step_sec}s]{{continuum}}"
     elif quantity in ["B"]:  # magnetic field vector data
-        query_str = f"hmi.B_{integration_time_sec}s{data_type}[{date_str_start}_{time_str_start}_TAI/{obs_length}h@{integration_time_sec}s]{{field,inclination,azimuth,disambig}}"
+        query_str = f"hmi.B_{integration_time_sec}s{data_type}[{date_str_start}_{time_str_start}_TAI/{obs_length}h@{time_step_sec}s]{{field,inclination,azimuth,disambig}}"
     else:  # magnetic field component
-        query_str = f"hmi.B_{integration_time_sec}s{data_type}[{date_str_start}_{time_str_start}_TAI/{obs_length}h@{integration_time_sec}s]{{{quantity}}}"
+        query_str = f"hmi.B_{integration_time_sec}s{data_type}[{date_str_start}_{time_str_start}_TAI/{obs_length}h@{time_step_sec}s]{{{quantity}}}"
     print(f"Data export query:\n\t{query_str}\n")
 
     process = {"im_patch": {
