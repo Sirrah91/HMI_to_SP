@@ -515,7 +515,7 @@ def arcsec_to_Mm(arcsec: float, distanceAU: float = 1., center_distance: bool = 
     return 2. * u.AU.to(u.Mm, distanceAU) * fun(u.arcsec.to(u.rad, arcsec) / 2.)
 
 
-def jsoc_query(obs_date: str,  # "%Y-%m-%d" or "%Y-%m-%dT%H:%M:%S.%f", e.g. "2020-01-01" or "2020-01-01T12:15:10.012"
+def jsoc_query(obs_date: str,  # see "parse_datetime" for valid formats
                quantity: str,
                data_type: Literal["", "dcon", "dconS"] = "",
                locunits: Literal["arcsec", "pixels", "stony", "carrlong"] = "stony",
