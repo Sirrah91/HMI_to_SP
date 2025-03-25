@@ -1035,35 +1035,36 @@ def create_full_video_from_images(ar_number: int,
                            output_format=output_format, fps=fps)
 
 
-def create_full_video_from_fits(ar_number: int,
+def create_full_video_from_fits(fits_dir: str,
+                                quantity: Literal["Ic", "Bp", "Bt", "Br"],
                                 output_filename: str = "video",
                                 output_format: Literal["avi", "mp4"] = "avi",
                                 fps: int = 1) -> None:
 
-    fits_all = sorted(glob(path.join(_result_dir, f"AR_{ar_number}_*")))
+    fits_all = sorted(glob(path.join(fits_dir, "*")))
 
     # create the base video
     fits_name = fits_all[0]
     with fits.open(fits_name) as hdu:
-        data = hdu[0].data
+        data = hdu[quantity].data
 
-    filenames = make_video_from_arrays(data, output_filename=output_filename, output_format=output_format, fps=fps)
+    filename = make_video_from_arrays(data, output_filename=output_filename, output_format=output_format, fps=fps)
 
     # append other videos
     for fits_name in fits_all[1:]:
         with fits.open(fits_name) as hdu:
-            data = hdu[0].data
+            data = hdu[quantity].data
 
-        tmp_filenames = make_video_from_arrays(data, output_filename="tmp_video", output_format=output_format, fps=fps)
+        tmp_filename = make_video_from_arrays(data, output_filename="tmp_video", output_format=output_format, fps=fps)
 
         # concatenate the video to the base one
-        [concatenate_videos(list_of_video_names=[filenames[i], tmp_filenames[i]],
-                            output_filename=filenames[i].split(".")[0],
-                            output_format=output_format,
-                            target_fps=fps) for i in range(len(filenames))]
+        concatenate_videos(list_of_video_names=[filename, tmp_filename],
+                           output_filename=filename.split(".")[0],
+                           output_format=output_format,
+                           target_fps=fps)
 
         # remove temp videos
-        [remove_if_exists(tmp_filename) for tmp_filename in tmp_filenames]
+        remove_if_exists(tmp_filename)
 
 
 def disambigue_azimuth(azimuth: np.ndarray, disambig: np.ndarray, method: int = 1,

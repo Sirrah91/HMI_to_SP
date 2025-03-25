@@ -260,7 +260,8 @@ def ransac_fit(x: np.ndarray | list[float], y: np.ndarray | list[float], deg: in
     poly = PolynomialFeatures(degree=deg)
     x_poly = poly.fit_transform(np.reshape(x, (-1, 1)))
 
-    ransac = RANSACRegressor(random_state=rnd_seed)
+    min_samples = deg + 1
+    ransac = RANSACRegressor(random_state=rnd_seed, min_samples=min_samples)
     ransac.fit(x_poly, y)
 
     p = ransac.estimator_.coef_
@@ -1584,12 +1585,16 @@ def make_video_from_images(list_of_figures: list[str],
 
 
 def make_video_from_arrays(array: np.ndarray,
+                           outdir: str = path.join(_path_figures, "videos"),
                            output_filename: str = "video",
                            output_format: Literal["avi", "mp4"] = "avi",
                            fps: int = 1) -> list[str]:
     import cv2
 
-    _, height, width, quantities = np.shape(array)
+    if np.ndim(array) == 4:
+        array = array[..., 0]
+
+    _, height, width = np.shape(array)
 
     if output_format == "avi":
         fourcc = cv2.VideoWriter_fourcc(*"XVID")
@@ -1598,34 +1603,30 @@ def make_video_from_arrays(array: np.ndarray,
     else:
         raise ValueError(f"Unsupported video format: {output_format}.")
 
-    outdir = path.join(_path_figures, "videos")
     check_dir(outdir)
-
-    filenames = [path.join(outdir, f"{output_filename}{_sep_out}{iq}.{output_format}") for iq in range(quantities)]
+    filename = path.join(outdir, f"{output_filename}.{output_format}")
 
     # array to 0-255 range (along the last dimension, where the quantities are)
-    for iq in range(quantities):
-        quantity = array[:, :, :, iq]
-        quantity = quantity - np.nanmin(quantity)
-        quantity /= np.nanmax(quantity)
-        quantity = np.array(quantity * 255., dtype="uint8")
+    array = array - np.nanmin(array)
+    array /= np.nanmax(array)
+    array = np.array(array * 255., dtype="uint8")
 
-        # Create a video writer object
-        video = cv2.VideoWriter(filename=filenames[iq],
-                                fourcc=fourcc,
-                                fps=fps,
-                                frameSize=(width, height),
-                                isColor=False)
+    # Create a video writer object
+    video = cv2.VideoWriter(filename=filename,
+                            fourcc=fourcc,
+                            fps=fps,
+                            frameSize=(width, height),
+                            isColor=False)
 
-        # Write each image to the video
-        for array_part in quantity:
-            video.write(array_part)
+    # Write each image to the video
+    for array_part in array:
+        video.write(array_part)
 
-        # Release the video writer object
-        cv2.destroyAllWindows()
-        video.release()
+    # Release the video writer object
+    cv2.destroyAllWindows()
+    video.release()
 
-    return filenames
+    return filename
 
 
 def concatenate_videos(list_of_video_names: list[str],
