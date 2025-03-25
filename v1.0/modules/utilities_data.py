@@ -564,7 +564,7 @@ def jsoc_query(obs_date: str,  # "%Y-%m-%d" or "%Y-%m-%dT%H:%M:%S.%f", e.g. "202
         obs_date = obs_date.split("T")[0]
     start_obs = parse_datetime(start_obs)
 
-    if start_obs is None:
+    if not start_obs:
         raise ValueError('Invalid date format. Check "parse_datetime" for options.')
 
     start_obs -= timedelta(minutes=margin_time)
@@ -1392,8 +1392,8 @@ def fill_header_for_wcs(header):
     t_obs = None  # Default if TSTART and TEND aren't present or parsing fails
     if "TSTART" in header and "TEND" in header:
         # Convert to datetime objects
-        tstart = try_parse_datetime(header["TSTART"])
-        tend = try_parse_datetime(header["TEND"])
+        tstart = parse_datetime(header["TSTART"])
+        tend = parse_datetime(header["TEND"])
 
         if tstart and tend:
             # Compute T_OBS as the midpoint
