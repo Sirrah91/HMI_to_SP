@@ -1,5 +1,5 @@
 from modules.utilities import check_dir, is_empty
-from modules.utilities_data import read_cotemporal_fits, prepare_hmi_data
+from modules.utilities_data import read_cotemporal_fits, prepare_hmi_data, gimme_bin_code_from_name
 from modules.NN_evaluate import process_patches
 from modules._constants import _model_config_file
 from modules._base_models import load_base_models
@@ -171,6 +171,12 @@ def write_to_fits(predictions: np.ndarray,
     os.chmod(output_file, mode=0o644)
 
 
+def filter_model_names_by_used_quantities(model_names: list[str], used_quantities: np.ndarray | list[bool]) -> list[str]:
+    bin_codes = np.array([gimme_bin_code_from_name(model_name) for model_name in model_names])  # Get bin codes
+    mask = np.array([all(b[i] == '0' or used_quantities[i] for i in range(4)) for b in bin_codes])
+    return [s for s, keep in zip(model_names, mask) if keep]
+
+
 def end_to_end_evaluate(data_dir: str,
                         output_dir: str | None = None,
                         data_type: Literal["fits", "sav", "auto"] = "auto",
@@ -205,7 +211,7 @@ def end_to_end_evaluate(data_dir: str,
     if not any(used_quantities):
         raise ValueError("Invalid input: No quantities to process.")
 
-    model_names = [model_name for i, model_name in enumerate(_model_names) if used_quantities[i]]
+    model_names = filter_model_names_by_used_quantities(_model_names, used_quantities)
 
     filenames = sorted(glob(path.join(data_dir, regex)))
 
