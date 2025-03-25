@@ -557,12 +557,7 @@ def jsoc_query(obs_date: str,  # see "parse_datetime" for valid formats
     margin_frames = 0
     margin_time = margin_frames * integration_time_sec / 60.
 
-    if "T" not in obs_date:
-        start_obs = f"{obs_date}T00:00:00.000"
-    else:
-        start_obs = obs_date
-        obs_date = obs_date.split("T")[0]
-    start_obs = parse_datetime(start_obs)
+    start_obs = parse_datetime(obs_date)
 
     if not start_obs:
         raise ValueError('Invalid date format. Check "parse_datetime" for options.')
@@ -579,11 +574,9 @@ def jsoc_query(obs_date: str,  # see "parse_datetime" for valid formats
     time_str_start = start_obs.strftime("%H:%M:%S")
 
     if t_ref is None:
-        date_str_centre = obs_centre.strftime("%Y-%m-%d")  # different format from the start
-        time_str_centre = obs_centre.strftime("%H:%M:%S")
-        t_ref = f"{date_str_centre}T{time_str_centre}"
-    elif "T" not in t_ref:
-        t_ref = f"{t_ref}T00:00:00.000"
+        t_ref = obs_centre.strftime("%Y-%m-%dT%H:%M:%S.%f")  # different format from the start
+    else:
+        t_ref = parse_datetime(t_ref).strftime("%Y-%m-%dT%H:%M:%S.%f")
 
     obs_length = int(np.ceil(obs_length.total_seconds() / 3600.))  # in hours
 
@@ -626,7 +619,8 @@ def jsoc_query(obs_date: str,  # see "parse_datetime" for valid formats
     print(f"\nRequest URL: {result.request_url}")
     print(f"{int(len(result.urls))} file(s) available for download.")
 
-    out_dir = path.join(_path_hmi, f"{outdir_prefix}{obs_date.replace('-', '')}{_sep_out}{locref_str}")
+    t_ref = t_ref.split("T")[0]
+    out_dir = path.join(_path_hmi, f"{outdir_prefix}{t_ref.replace('-', '')}{_sep_out}{locref_str}")
     check_dir(out_dir)
 
     # Skip existing files.
