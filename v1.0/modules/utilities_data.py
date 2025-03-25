@@ -562,7 +562,7 @@ def jsoc_query(obs_date: str,  # "%Y-%m-%d" or "%Y-%m-%dT%H:%M:%S.%f", e.g. "202
     else:
         start_obs = obs_date
         obs_date = obs_date.split("T")[0]
-    start_obs = datetime.strptime(start_obs, "%Y-%m-%dT%H:%M:%S.%f")
+    start_obs = parse_datetime(start_obs)
     start_obs -= timedelta(minutes=margin_time)
 
     end_obs = start_obs + timedelta(hours=total_obs_time_hours, minutes=2*margin_time)
@@ -1278,30 +1278,38 @@ def hmi_psf_approx(kernel_size: int = 7, method: Literal["Couvidat", "Baso"] = "
     return res / np.sum(res)
 
 
+def parse_datetime(date_str: str) -> datetime | None:
+    """
+    Try parsing the date string with multiple formats and return the parsed datetime object.
+    Returns None if parsing fails.
+    """
+
+    # List of possible date formats
+    formats = [
+        "%Y-%m-%dT%H:%M:%S.%f",  # e.g., 2025-02-13T12:30:45.123456
+        "%Y-%m-%dT%H:%M:%S",  # e.g., 2025-02-13T12:30:45
+        "%Y-%m-%dT%H:%M",  # e.g., 2025-02-13T12:30
+        "%Y-%m-%dT%H",  # e.g., 2025-02-13T12
+        "%Y-%m-%d",  # e.g., 2025-02-13
+        "%d/%m/%Y %H:%M:%S.%f",  # e.g., 13/02/2025 12:30:45.123456
+        "%d/%m/%Y %H:%M:%S",  # e.g., 13/02/2025 12:30:45
+        "%d/%m/%Y %H:%M",  # e.g., 13/02/2025 12:30
+        "%d/%m/%Y %H",  # e.g., 13/02/2025 12
+        "%d/%m/%Y",  # e.g., 13/02/2025
+    ]
+
+    for date_format in formats:
+        try:
+            return datetime.strptime(date_str, date_format)
+        except ValueError:
+            continue
+    return None
+
+
 def fill_header_for_wcs(header):
     """
     Fill in missing keywords and ensure the header is complete for WCS.
     """
-    def try_parse_datetime(date_str: str) -> datetime | None:
-        """
-        Try parsing the date string with multiple formats and return the parsed datetime object.
-        Returns None if parsing fails.
-        """
-
-        # List of possible date formats
-        formats = [
-            "%Y-%m-%dT%H:%M:%S.%f",  # e.g., 2025-02-13T12:30:45.123456
-            "%Y-%m-%dT%H:%M:%S",  # e.g., 2025-02-13T12:30:45
-            "%Y-%m-%d",  # e.g., 2025-02-13
-            "%d/%m/%Y %H:%M:%S",  # e.g., 13/02/2025 12:30:45
-        ]
-
-        for date_format in formats:
-            try:
-                return datetime.strptime(date_str, date_format)
-            except ValueError:
-                continue
-        return None
 
     header.setdefault("RSUN_OBS", header.get("SOLAR_RA", 960.))  # In arcsec
     header.setdefault("DSUN_OBS", 1.0 * u.AU.to(u.m))  # Assume distance to Sun is 1 AU.
