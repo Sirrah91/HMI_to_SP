@@ -7,6 +7,7 @@ from modules._base_models import load_base_models
 from glob import glob
 from os import path
 import os
+import warnings
 from typing import Literal
 import re
 import numpy as np
@@ -173,8 +174,8 @@ def write_to_fits(predictions: np.ndarray,
 
 def filter_model_names_by_used_quantities(model_names: list[str], used_quantities: np.ndarray | list[bool]) -> list[str]:
     bin_codes = np.array([gimme_bin_code_from_name(model_name) for model_name in model_names])  # Get bin codes
-    mask = np.array([all(b[i] == '0' or used_quantities[i] for i in range(4)) for b in bin_codes])
-    return [s for s, keep in zip(model_names, mask) if keep]
+    mask = np.array([all(b[i] == "0" or used_quantities[i] for i in range(len(used_quantities))) for b in bin_codes])
+    return [model_name for model_name, keep in zip(model_names, mask) if keep]
 
 
 def end_to_end_evaluate(data_dir: str,
@@ -217,6 +218,12 @@ def end_to_end_evaluate(data_dir: str,
 
     for filename in filenames:
         fits_dict = read_cotemporal_fits(filename, check_uniqueness=True)
+
+        if ((not fits_dict["fits_ic"] and used_quantities[0])
+                or ((not fits_dict["fits_b"] or not fits_dict["fits_inc"] or not fits_dict["fits_azi"])
+                    and any(used_quantities[1:]))):
+            warnings.warn(f"At least one of the fits file is missing for input \n\t{filename}.")
+            continue
 
         # filter fits_dict using used_quantities
         if not used_quantities[0]:
