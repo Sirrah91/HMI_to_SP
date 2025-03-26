@@ -1026,6 +1026,21 @@ def gimme_params(model_name: str, subfolder: str = "") -> dict:
     raise ValueError(f"Unknown parameters for {model_name}.")
 
 
+def collect_data_from_fits(fits_dir: str, quantity: Literal["Ic", "Bp", "Bt", "Br"]) -> np.ndarray:
+    fits_all = sorted(glob(path.join(fits_dir, "*")))
+
+    for i, fits_file in enumerate(fits_all):
+        with fits.open(fits_file) as hdu:
+            data = hdu[quantity].data
+
+        if i == 0:
+            result = np.zeros((len(fits_all), *np.shape(data)[1:]))
+
+        result[i] = data
+
+    return result
+
+
 def create_full_video_from_images(ar_number: int,
                                   output_filename: str = "video",
                                   output_format: Literal["avi", "mp4"] = "avi",
@@ -1040,6 +1055,16 @@ def create_full_video_from_fits(fits_dir: str,
                                 output_filename: str = "video",
                                 output_format: Literal["avi", "mp4"] = "avi",
                                 fps: int = 1) -> None:
+
+    array = collect_data_from_fits(fits_dir, quantity)
+    make_video_from_arrays(array, output_filename=output_filename, output_format=output_format, fps=fps)
+
+
+def create_full_video_from_fits_v2(fits_dir: str,
+                                   quantity: Literal["Ic", "Bp", "Bt", "Br"],
+                                   output_filename: str = "video",
+                                   output_format: Literal["avi", "mp4"] = "avi",
+                                   fps: int = 1) -> None:
 
     fits_all = sorted(glob(path.join(fits_dir, "*")))
 
