@@ -1045,6 +1045,7 @@ def create_full_video_from_images(ar_number: int,
                                   output_filename: str = "video",
                                   output_format: Literal["avi", "mp4"] = "avi",
                                   fps: int = 1) -> None:
+
     list_of_figures = sorted(glob(path.join(_path_figures, "HMI_to_SOT", f"AR_{ar_number}", "*")))
     make_video_from_images(list_of_figures=list_of_figures, output_filename=output_filename,
                            output_format=output_format, fps=fps)
@@ -1052,9 +1053,12 @@ def create_full_video_from_images(ar_number: int,
 
 def create_full_video_from_fits(fits_dir: str,
                                 quantity: Literal["Ic", "Bp", "Bt", "Br"],
-                                output_filename: str = "video",
+                                output_filename: str = "",
                                 output_format: Literal["avi", "mp4"] = "avi",
                                 fps: int = 1) -> None:
+
+    if not output_filename:
+        output_filename = quantity
 
     array = collect_data_from_fits(fits_dir, quantity)
     make_video_from_arrays(array, output_filename=output_filename, output_format=output_format, fps=fps)
@@ -1062,9 +1066,12 @@ def create_full_video_from_fits(fits_dir: str,
 
 def create_full_video_from_fits_v2(fits_dir: str,
                                    quantity: Literal["Ic", "Bp", "Bt", "Br"],
-                                   output_filename: str = "video",
+                                   output_filename: str = "",
                                    output_format: Literal["avi", "mp4"] = "avi",
                                    fps: int = 1) -> None:
+
+    if not output_filename:
+        output_filename = quantity
 
     fits_all = sorted(glob(path.join(fits_dir, "*")))
 
