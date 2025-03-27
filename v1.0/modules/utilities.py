@@ -1609,7 +1609,7 @@ def make_video_from_arrays(array: np.ndarray,
     # array to 0-255 range (along the last dimension, where the quantities are)
     array = array - np.nanmin(array)
     array /= np.nanmax(array)
-    array = np.array(array * 255., dtype="uint8")
+    array = np.round(array * 255.).astype("uint8")
 
     # Create a video writer object
     video = cv2.VideoWriter(filename=filename,
