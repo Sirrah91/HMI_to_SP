@@ -1,7 +1,8 @@
 from modules.NN_config import conf_grid_setup
 from modules.utilities_data import (save_data, load_npz, disambigue_azimuth, hmi_psf, data_b2ptr, quiet_sun_mask,
-                                    remove_limb_darkening_approx, normalise_intensity, check_hmi_header,
-                                    read_cotemporal_fits, convert_unit, hmi_noise, split_data_to_patches)
+                                    remove_limb_darkening_approx, normalise_intensity, check_hmi_header, jsoc_query,
+                                    read_cotemporal_fits, convert_unit, hmi_noise, split_data_to_patches,
+                                    parse_datetime)
 from modules.utilities import (rmse, remove_outliers_2d, check_dir, stack, interpolate_mask, remove_nan,
                                apply_psf, is_empty, pad_zeros_or_crop, return_mean_std, plot_me, create_circular_mask,
                                filter_fft_amplitude)
@@ -44,98 +45,31 @@ sp_dy_median, sp_dx_median = 0.319978, 0.29714
 
 def jsoc_query_from_sp_name(SP_filename: str, quantity: str, data_type: Literal["", "dcon", "dconS"] = "",
                             integration_time: int | None = None) -> None:
-    warnings.filterwarnings("ignore")
-
-    # E-mail registered in JSOC
-    email = "AAA@BBB.CCC"
-
-    margin_box = 0.  # margin of box width/height in "boxunits" (0. to keep scale)
-    # margin of timespan in minutes
-    margin_time = 10
-
     # reference SP level 2 Hinode observation
-    hdu = fits.open(path.join(_path_sp, SP_filename))
+    with fits.open(path.join(_path_sp, SP_filename)) as hdu:
+        obs_start = parse_datetime(hdu[0].header["TSTART"])
+        obs_end = parse_datetime(hdu[0].header["TEND"])
+        locref = (hdu[0].header["YCEN"], hdu[0].header["XCEN"])
+        boxsize = (np.max(hdu[39].data) - np.min(hdu[39].data), np.max(hdu[38].data) - np.min(hdu[38].data))
 
-    obs_start = hdu[0].header["TSTART"]
-    obs_start = datetime.strptime(obs_start, "%Y-%m-%dT%H:%M:%S.%f")
-    obs_start -= timedelta(minutes=margin_time)
+    total_obs_time_hours = obs_end - obs_start
+    total_obs_time_hours = total_obs_time_hours.total_seconds() / 3600.
 
-    obs_end = hdu[0].header["TEND"]
-    obs_end = datetime.strptime(obs_end, '%Y-%m-%dT%H:%M:%S.%f')
-    obs_end += timedelta(minutes=margin_time)
-
-    obs_length = obs_end - obs_start
-    # cannot be (obs_start + obs_end) / 2 because datetime does not support "+" but timedelta does
-    obs_centre = obs_start + obs_length / 2
-
-    date_str_start = obs_start.strftime("%Y.%m.%d")
-    time_str_start = obs_start.strftime("%H:%M:%S")
-
-    date_str_centre = obs_centre.strftime("%Y-%m-%d")  # different format from the start
-    time_str_centre = obs_centre.strftime("%H:%M:%S")
-
-    obs_length = int(np.ceil(obs_length.total_seconds() / 3600.))  # in hours
-
-    if data_type:
-        data_type = f"_{data_type}"
-
-    if quantity in ["I", "continuum", "intensity", "Ic"]:  # Ic data duration@lagImages
-        if integration_time is None: integration_time = 45  # in seconds
-        query_str = f"hmi.Ic_{integration_time}s{data_type}[{date_str_start}_{time_str_start}_TAI/{obs_length}h@{integration_time}s]{{continuum}}"
-    elif quantity in ["B"]:  # magnetic field vector data
-        if integration_time is None: integration_time = 720  # in seconds
-        query_str = f"hmi.B_{integration_time}s{data_type}[{date_str_start}_{time_str_start}_TAI/{obs_length}h@{integration_time}s]{{field,inclination,azimuth,disambig}}"
-    else:  # magnetic field component
-        if integration_time is None: integration_time = 720  # in seconds
-        query_str = f"hmi.B_{integration_time}s{data_type}[{date_str_start}_{time_str_start}_TAI/{obs_length}h@{integration_time}s]{{{quantity}}}"
-    print(f"Data export query:\n\t{query_str}\n")
-
-    process = {"im_patch": {
-        "t_ref": f"{date_str_centre}T{time_str_centre}",
-        # there must be a non-missing image within +- 2 hours of t_ref
-        "t": 0,  # tracking?
-        "r": 0,  # register the images to the first frame?
-        "c": 0,  # cropping?
-        "locunits": "arcsec",  # units for x and y
-        "x": hdu[0].header["XCEN"],  # center_x in locunits
-        "y": hdu[0].header["YCEN"],  # center_y in locunits
-        "boxunits": "arcsec",  # units for width and height
-        "width": np.max(hdu[38].data) - np.min(hdu[38].data) + margin_box,
-        "height": np.max(hdu[39].data) - np.min(hdu[39].data) + margin_box,
-    }}
-
-    hdu.close()
-
-    print("Submitting export request...")
-    client = drms.Client()
-    result = client.export(
-        query_str,
-        method="url",
-        protocol="fits",
-        email=email,
-        process=process,
-    )
-
-    # Print request URL.
-    print(f"\nRequest URL: {result.request_url}")
-    print(f"{int(len(result.urls))} file(s) available for download.")
-
-    out_dir = path.join(_data_dir, f"SDO_HMI{data_type}", SP_filename.replace(".fits", ""))
-    check_dir(out_dir)
-
-    # Skip existing files.
-    stored_files = os.listdir(out_dir)
-    new_file_indices = np.where([file not in stored_files for file in result.data["filename"]])[0]
-    print(f"{len(new_file_indices)} file(s) haven't been downloaded yet.\n")
-
-    # Download selected files.
-    result.wait()
-    result.download(out_dir, index=new_file_indices)
-    print("Download finished.")
-    print(f'Download directory:\n\t"{path.abspath(out_dir)}"\n')
-
-    print("Pausing the code for 10 seconds to avoid errors caused by pending requests.\n")
-    time.sleep(10)
+    jsoc_query(obs_date=obs_start.strftime("%Y-%m-%dT%H:%M:%S.%f"),
+               quantity=quantity,
+               data_type=data_type,
+               locunits="arcsec",
+               locref=locref,
+               integration_time_sec=integration_time,
+               time_step_sec=integration_time,
+               total_obs_time_hours=total_obs_time_hours,
+               t_ref=None,
+               boxunits="arcsec",
+               boxsize=boxsize,
+               outdir=path.join(_data_dir, f"SDO_HMI_{data_type}") if data_type else path.join(_data_dir, f"SDO_HMI"),
+               margin_frames=2,
+               outdir_prefix=SP_filename.replace(".fits", "")
+               )
 
 
 def return_sp_shape(SP_filename: str) -> tuple[int, ...]:
@@ -333,7 +267,7 @@ def read_hmi_B(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = "pt
         if not check_hmi_header([index_b, index_bi, index_bg, index_bgd]):
             raise ValueError("(At least) one of fits file is not compatible with others.")
 
-        bg = disambigue_azimuth(bg, bgd, method=1,
+        bg = disambigue_azimuth(bg, bgd, method="random",
                                 rotated_image="history" in index_b and "rotated" in str(index_b["history"]))
 
         return data_b2ptr(index=index_b, bvec=np.array([b, bi, bg]))
@@ -387,7 +321,7 @@ def read_sp(SP_filename: str, coordinates: Literal["ptr", "ptr_native"] = "ptr_n
 def resize_data(data: np.ndarray, final_shape: tuple[int, ...]) -> np.ndarray:
     if np.ndim(data) > 2:
         return np.array([resize_data(data=data_part, final_shape=final_shape) for data_part in data])
-    return resize(data, final_shape, anti_aliasing=True)
+    return resize(data, final_shape, anti_aliasing=True, preserve_range=True)
 
 
 def blur_sp(sp_observation: np.ndarray, psf: np.ndarray | None = None) -> np.ndarray:
@@ -631,7 +565,8 @@ def get_hmi_sectors(quantity: str, SP_filename: str, hmi_b: np.ndarray | None = 
             data = hmi_b[index1, index_b]
 
         ind_sector = np.where(ind_time_hmi == unique_ind_time_hmi[i])[0]
-        hmi_sectors_quantity[:, ind_sector] = resize(data, np.shape(hmi_sectors_quantity), anti_aliasing=True)[:, ind_sector]
+        hmi_sectors_quantity[:, ind_sector] = resize(data, np.shape(hmi_sectors_quantity),
+                                                     anti_aliasing=True, preserve_range=True)[:, ind_sector]
 
     return hmi_sectors_quantity, width_mean
 
@@ -1282,7 +1217,7 @@ def pipeline_alignment(skip_jsoc_query: bool = False,
     #
     # HERE SHOULD BE IDL RUN FOR coordinates="ptr_native"
     #
-    
+
     SP_filenames = SP_filenames[file_slice]
 
     for SP_filename in tqdm(SP_filenames):

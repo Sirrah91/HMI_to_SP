@@ -30,8 +30,10 @@ import h5py
 import ast
 from astropy.io import fits
 from astropy.wcs import WCS
+from astropy.wcs.utils import fit_wcs_from_points
 from astropy.coordinates import SkyCoord
 import astropy.units as u
+from astropy.time import Time
 from sunpy.coordinates import Helioprojective, HeliographicStonyhurst
 from scipy.special import j1
 from skimage.transform import resize
@@ -383,19 +385,145 @@ def check_hmi_header(list_of_headers: list) -> bool:
     return all(rotated) or all(~rotated)
 
 
+def adjust_header_and_derotation(original_header,
+                                 scale1: float = 1.,
+                                 scale2: float = 1.,
+                                 from_row: int | None = None,
+                                 to_row: int | None = None,
+                                 from_col: int | None = None,
+                                 to_col: int | None = None) -> tuple:
+    """
+    Prepare geometric transformations to the data and updates the FITS header accordingly.
+
+    This function corrects the input data and header by:
+    - Adjusting for potential flipping along the axes to maintain a right-handed coordinate system.
+    - Undoing rotations by modifying `CROTA2` and rotating the data accordingly.
+    - Cropping the data based on the specified row and column indices.
+    - Rescaling the data and updating WCS information in the header.
+    - Adjusting reference pixel (`CRPIX1`, `CRPIX2`) positions and field centre coordinates (`XCEN`, `YCEN`).
+
+    Parameters
+    ----------
+    original_header : astropy.io.fits.Header
+        The FITS header containing WCS information for the input data.
+    scale1 : float, optional
+        Scaling factor along the x-axis (default is 1.0).
+    scale2 : float, optional
+        Scaling factor along the y-axis (default is 1.0).
+    from_row : int | None, optional
+        Starting row index for cropping. If None, no cropping is applied.
+    to_row : int | None, optional
+        Ending row index for cropping. If None, no cropping is applied.
+    from_col : int | None, optional
+        Starting column index for cropping. If None, no cropping is applied.
+    to_col : int | None, optional
+        Ending column index for cropping. If None, no cropping is applied.
+
+    Returns
+    -------
+    data_adjusted : np.ndarray
+        The transformed data array with the correct orientation.
+    header_adjusted : astropy.io.fits.Header
+        The updated FITS header reflecting the applied transformations.
+    """
+
+    header = fill_header_for_wcs(original_header.copy())
+
+    def get_derotation_function(header):
+        """Returns a function that undoes the flipping and rotation from the original header."""
+        flips = []
+
+        if header["CDELT1"] < 0:
+            flips.append(1)  # Flip along axis 1
+        if header["CDELT2"] < 0:
+            flips.append(0)  # Flip along axis 0
+
+        def derotate_data(data):
+            """Applies the computed flipping and rotation to the data array."""
+            data = np.flip(data, axis=flips)  # Right-handed system
+            data = np.rot90(data, k=best_k)  # Undo rotation
+            return data
+
+        return derotate_data
+
+    derot_func = get_derotation_function(header)
+
+    # Ensure CROTA2 is between 0 and 360
+    crota2 = np.mod(original_header["CROTA2"], 360.)
+
+    # Minimise difference to 0 or 360
+    possible_rotations = [(k_val, np.mod(crota2 + k_val * 90, 360)) for k_val in [0, 1, 2, 3]]
+    best_k, best_crota = min(possible_rotations, key=lambda x: min(abs(x[1]), abs(x[1] - 360)))
+
+    header["CROTA2"] = best_crota
+
+    # Calculate cropping correction
+    _from_row = from_row if from_row is not None else 0
+    _to_row = to_row if to_row is not None else header["NAXIS2"]
+    row_correction = _to_row - _from_row
+
+    _from_col = from_col if from_col is not None else 0
+    _to_col = to_col if to_col is not None else header["NAXIS1"]
+    col_correction = _to_col - _from_col
+
+    # Adjust reference pixel position based on cropping
+    header["CRPIX1"] -= _from_col
+    header["CRPIX2"] -= _from_row
+
+    # Adjust image size after cropping and scaling
+    header["NAXIS1"] = np.round(col_correction * scale1).astype(int)
+    header["NAXIS2"] = np.round(row_correction * scale2).astype(int)
+
+    # Update resolution in arcsec/px
+    header["CDELT1"] = np.abs(col_correction * original_header["CDELT1"] / header["NAXIS1"])
+    header["CDELT2"] = np.abs(row_correction * original_header["CDELT2"] / header["NAXIS2"])
+
+    # Convert reference pixel position to new grid (after resize)
+    header["CRPIX1"] *= header["CDELT1"]
+    header["CRPIX2"] *= header["CDELT2"]
+
+    # Handle flipping if CDELT1 or CDELT2 are negative
+    if original_header["CDELT1"] < 0:
+        header["CRPIX1"] = header["NAXIS1"] + 1 - header["CRPIX1"]
+
+    if original_header["CDELT2"] < 0:
+        header["CRPIX2"] = header["NAXIS2"] + 1 - header["CRPIX2"]
+
+    # Handle CROTA2 changes: rotate CRPIX1/CRPIX2 accordingly
+    if best_k == 1:  # +90° rotation
+        header["CRPIX1"], header["CRPIX2"] = header["CRPIX2"], header["NAXIS1"] + 1 - header["CRPIX1"]
+    elif best_k == 2:  # +180° rotation
+        header["CRPIX1"] = header["NAXIS1"] + 1 - header["CRPIX1"]
+        header["CRPIX2"] = header["NAXIS2"] + 1 - header["CRPIX2"]
+    elif best_k == 3:  # +270° rotation
+        header["CRPIX1"], header["CRPIX2"] = header["NAXIS2"] + 1 - header["CRPIX2"], header["CRPIX1"]
+
+    crota2 = np.deg2rad(header["CROTA2"])
+    header["XCEN"] = (header["CRVAL1"]
+                      + header["CDELT1"] * np.cos(crota2) * ((header["NAXIS1"] + 1.) / 2. - header["CRPIX1"])
+                      - header["CDELT2"] * np.sin(crota2) * ((header["NAXIS2"] + 1.) / 2. - header["CRPIX2"]))
+
+    header["YCEN"] = (header["CRVAL2"]
+                      + header["CDELT1"] * np.sin(crota2) * ((header["NAXIS1"] + 1.) / 2. - header["CRPIX1"])
+                      + header["CDELT2"] * np.cos(crota2) * ((header["NAXIS2"] + 1.) / 2. - header["CRPIX2"]))
+
+    return header, derot_func
+
+
 def prepare_hmi_data(fits_ic: str | None = None,
                      fits_b: str | None = None,
                      fits_inc: str | None = None,
                      fits_azi: str | None = None,
                      fits_disamb: str | None = None,
+                     remove_limb_dark: bool = True,
+                     disambiguate: bool = True,
+                     disambiguate_method: int | Literal["radial_acute", "random", "potential_acute"] = "random",
+                     interpolate_outliers: bool = False,
                      from_row: int | None = None,
                      to_row: int | None = None,
                      from_col: int | None = None,
                      to_col: int | None = None,
-                     remove_limb_dark: bool = True,
-                     disambiguate: bool = True,
-                     interpolate_outliers: bool = False,
-                     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, any]:
+                     ) -> tuple[np.ndarray, any]:
     from modules.align_data import calc_hmi_to_sp_resolution
 
     hmi_to_sp_rows, hmi_to_sp_cols = calc_hmi_to_sp_resolution(fast=True)
@@ -410,7 +538,7 @@ def prepare_hmi_data(fits_ic: str | None = None,
     def resize_data(data: np.ndarray) -> np.ndarray:
         """Resize data efficiently."""
         output_shape = np.round([hmi_to_sp_rows * data.shape[0], hmi_to_sp_cols * data.shape[1]]).astype(int)
-        return resize(data, output_shape, anti_aliasing=True)
+        return resize(data, output_shape, anti_aliasing=True, preserve_range=True)
 
     def crop_data(data: np.ndarray) -> np.ndarray:
         """Crop data to the specified row and column range."""
@@ -457,7 +585,7 @@ def prepare_hmi_data(fits_ic: str | None = None,
                 read_and_process_fits(fits_inc, dtype=_wp),
                 disambigue_azimuth(read_and_process_fits(fits_azi, dtype=_wp),
                                    read_and_process_fits(fits_disamb, dtype=int),
-                                   method=1,
+                                   method=disambiguate_method,
                                    rotated_image="history" in index and "rotated" in str(index["history"]))
             ], axis=0)
         else:
@@ -498,16 +626,17 @@ def prepare_hmi_data(fits_ic: str | None = None,
     header_source = fits_ic or fits_b
     with fits.open(header_source, memmap=True) as hdu:
         header = hdu[1].header
-    lon, lat = return_lonlat(header)
 
     # Rotate coordinates to ensure North is up and East is left
-    data = rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=data)
-    lon, lat = rot_coordinates_to_NW(longitude=lon, latitude=lat, array_to_flip=[lon, lat])
-    lon, lat = resize_data(lon), resize_data(lat)
-    lon, lat = np.clip(lon, a_min=-180., a_max=180.), np.clip(lat, a_min=-90., a_max=90.)
+    header, derot_func = adjust_header_and_derotation(header,
+                                                      scale1=hmi_to_sp_cols, scale2=hmi_to_sp_rows,
+                                                      from_row=from_row, to_row=to_row,
+                                                      from_col=from_col, to_col=to_col
+                                                      )
+    data = derot_func(data)
 
     # If B is included, Bp: +W, Bt: +S, Br: -grav
-    return data, lon, lat, header
+    return data, header
 
 
 def arcsec_to_Mm(arcsec: float, distanceAU: float = 1., center_distance: bool = True) -> float:
@@ -526,16 +655,15 @@ def jsoc_query(obs_date: str,  # see "parse_datetime" for valid formats
                t_ref: str | None = None,
                boxunits: Literal["pixels", "arcsec", "degrees"] = "pixels",
                boxsize: tuple[int, int] | list[int] | np.ndarray | int = (512, 512),
+               margin_frames: int = 0,
                outdir: str = _path_hmi,
-               outdir_prefix: str = "") -> str:
+               outdir_prefix: str = "auto",
+               email: str = "d.korda@seznam.cz") -> str:
 
     warnings.filterwarnings("ignore")
 
     if time_step_sec is None:
         time_step_sec = integration_time_sec
-
-    # E-mail registered in JSOC
-    email = "d.korda@seznam.cz"
 
     if isinstance(boxsize, int):
         boxsize = (boxsize, boxsize)
@@ -551,12 +679,10 @@ def jsoc_query(obs_date: str,  # see "parse_datetime" for valid formats
         tmp = f"N{locref_str[0]:02d}" if locref_str[0] >= 0 else f"S{-locref_str[0]:02d}"
         locref_str = f"{tmp}W{locref_str[1]:02d}" if locref_str[1] >= 0 else f"{tmp}E{-locref_str[1]:02d}"
     else:
-        unit = "px" if locunits == "pixels" else "deg"
-        locref_str = f"({';'.join([str(round(loc)) for loc in locref])}){unit}"
+        locref_str = f"({';'.join([str(round(loc)) for loc in locref])}){locunits}"
 
     # margin of timespan in minutes
-    margin_frames = 0
-    margin_time = margin_frames * integration_time_sec / 60.
+    margin_time = margin_frames * time_step_sec / 60.
 
     start_obs = parse_datetime(obs_date)
 
@@ -564,7 +690,6 @@ def jsoc_query(obs_date: str,  # see "parse_datetime" for valid formats
         raise ValueError('Invalid date format. Check "parse_datetime" for options.')
 
     start_obs -= timedelta(minutes=margin_time)
-
     end_obs = start_obs + timedelta(hours=total_obs_time_hours, minutes=2*margin_time)
 
     obs_length = end_obs - start_obs
@@ -579,7 +704,7 @@ def jsoc_query(obs_date: str,  # see "parse_datetime" for valid formats
     else:
         t_ref = parse_datetime(t_ref).strftime("%Y-%m-%dT%H:%M:%S.%f")
 
-    obs_length = int(np.ceil(obs_length.total_seconds() / 3600.))  # in hours
+    obs_length = obs_length.total_seconds() / 3600.  # in hours
 
     if data_type:
         data_type = f"_{data_type}"
@@ -620,8 +745,10 @@ def jsoc_query(obs_date: str,  # see "parse_datetime" for valid formats
     print(f"\nRequest URL: {result.request_url}")
     print(f"{int(len(result.urls))} file(s) available for download.")
 
-    t_ref = t_ref.split("T")[0]
-    outdir = path.join(outdir, f"{outdir_prefix}{t_ref.replace('-', '')}{_sep_out}{locref_str}")
+    t_ref = t_ref.split("T")[0].replace("-", "")
+    if outdir_prefix == "auto":
+        outdir_prefix = f"{t_ref}{_sep_out}{locref_str}"
+    outdir = path.join(outdir, f"{outdir_prefix}")
     check_dir(outdir)
 
     # Skip existing files.
@@ -1034,7 +1161,7 @@ def collect_data_from_fits(fits_dir: str, quantity: Literal["Ic", "Bp", "Bt", "B
             data = hdu[quantity].data
 
         if i == 0:
-            result = np.zeros((len(fits_all), *np.shape(data)[1:]))
+            result = np.zeros((len(fits_all), *np.shape(data)[-2:]))
 
         result[i] = data
 
@@ -1099,14 +1226,57 @@ def create_full_video_from_fits_v2(fits_dir: str,
         remove_if_exists(tmp_filename)
 
 
-def disambigue_azimuth(azimuth: np.ndarray, disambig: np.ndarray, method: int = 1,
+def disambigue_azimuth(azimuth: np.ndarray, disambig: np.ndarray,
+                       method: int | Literal["radial_acute", "random", "potential_acute"] = "random",
                        rotated_image: bool = False) -> np.ndarray:
+    methods = {0: "potential_acute",
+               1: "random",
+               2: "radial_acute",
+               "default": 1}
+
+    methods_reverse = {value: key for key, value in methods.items() if isinstance(key, int)}
+
+    if isinstance(method, str):
+        if "potential" in method:
+            method = methods_reverse["potential_acute"]
+        elif "random" in method:
+            method = methods_reverse["random"]
+        elif "radial" in method:
+            method = methods_reverse["radial_acute"]
+        else:
+            warnings.warn(f'Invalid disambiguation method "{method}". Set to "{methods[methods["default"]]}".')
+            method = methods["default"]
+
+    elif isinstance(method, int):
+        if method not in methods:
+            warnings.warn(f'Invalid disambiguation method "{method}". Set to "{methods[methods["default"]]}".')
+            method = methods["default"]
+
+    else:
+        warnings.warn(f'Invalid disambiguation method "{method}". Set to "{methods[methods["default"]]}".')
+        method = methods["default"]
+
+    def extract_bit(arr: np.ndarray, bit: int) -> np.ndarray:
+        """Exctract a specific bit from an encoded integer array"""
+        arr = arr.astype(int)  # Ensure integer type
+        # arr >> bit moves the binary representation of arr to the right by "bit" places
+        # The bits that are shifted out are lost, e.g. 21 >> 2 (10101 -> 101.01 -> 101)
+        # Similarly arr << bit will add "bit" zeros at the end (0b10101 << 2 -> 0b1010100)
+        # arr & N performs bit-wise and, e.g. 0b10101 & 0b1101 -> 0b00101
+        
+        # This shifts the target bit to the last position and applies mask that only accepts the last one
+        return ((arr >> bit) & 1).astype(float)  # Shift right, mask, convert to float
+
+    """
+    # THE MEANING OF METHOD HERE IS OPPOSITE, RADIAL == 0 ETC.
     disambig = np.array(disambig, dtype=int)
     disambig_shape = np.shape(disambig)
     disambig = np.ravel(disambig)
     diasmbig_matrix = np.array([f"{value:03b}"[method] for value in disambig], dtype=float)
     diasmbig_matrix = np.reshape(diasmbig_matrix, disambig_shape)
-
+    """
+    
+    diasmbig_matrix = extract_bit(disambig, bit=method)
     if rotated_image:
         # im_patch rotate the image 180 deg
         #  - add 180 deg to all pixels and add another 180 deg to those with disambig == 1
@@ -1344,21 +1514,37 @@ def fill_header_for_wcs(header):
     """
 
     header.setdefault("RSUN_OBS", header.get("SOLAR_RA", 960.))  # In arcsec
+    header.comments["RSUN_OBS"] = "[arcsec] angular radius of Sun. Corresponds to"
     header.setdefault("DSUN_OBS", 1.0 * u.AU.to(u.m))  # Assume distance to Sun is 1 AU.
+    header.comments["DSUN_OBS"] = "[m] Distance from SDO to Sun center."
+
+    header.setdefault("WCSNAME", "Helioprojective-cartesian")
+    header.comments["DSUN_OBS"] = "WCS system name "
+    header.setdefault("RSUN_REF", 696000000.)
+    header.comments["DSUN_OBS"] = "[m] Reference radius of the Sun: 696,000,000.0"
+    header.setdefault("DSUN_REF", 149597870691.)
+    header.comments["DSUN_OBS"] = "[m] Astronomical Unit"
 
     header.setdefault("CRLN_OBS", 0.0)  # Default Carrington longitude
-    header.setdefault("CRLT_OBS", header.get("B_ANGLE", 0.))  # Use B_ANGLE for CRLT_OBS.
-
+    header.comments["CRLN_OBS"] = "[deg] Carrington longitude of the observer"
+    header.setdefault("CRLT_OBS", header.get("B_ANGLE", 0.0))  # Use B_ANGLE for CRLT_OBS.
+    header.comments["CRLT_OBS"] = "[deg] Carrington latitude of the observer"
+    
     header.setdefault("CROTA2", -header.get("P_ANGLE", -0.))  # Translate P_ANGLE to CROTA2
-
+    header.comments["CROTA2"] = "[deg] CROTA2: INST_ROT + SAT_ROT"
+    
     header.setdefault("CDELT1", header.get("XSCALE", None))  # Pixel scale in arcsec/pixel
+    header.comments["CDELT1"] = "[arcsec/pixel] image scale in the x direction"
     header.setdefault("CDELT2", header.get("YSCALE", None))  # Pixel scale in arcsec/pixel
+    header.comments["CDELT2"] = "[arcsec/pixel] image scale in the y direction"
 
     crota2 = np.deg2rad(header["CROTA2"])
 
     # Set reference point to [0, 0] arcsec by default
     header.setdefault("CRVAL1", 0.)
+    header.comments["CRVAL1"] = "[arcsec] CRVAL1: x origin"
     header.setdefault("CRVAL2", 0.)
+    header.comments["CRVAL2"] = "[arcsec] CRVAL2: y origin"
 
     # Convert center and scale information into the WCS-required format
     # http://jsoc.stanford.edu/doc/keywords/JSOC_Keywords_for_metadata.pdf
@@ -1403,18 +1589,35 @@ def fill_header_for_wcs(header):
                 + header["CDELT2"] * np.cos(crota2) * ((header["NAXIS2"] + 1.) / 2. - header["CRPIX2"]))
 
     header.setdefault("CRPIX1", crpix1)
+    header.comments["CRPIX1"] = "[pixel] CRPIX1: location of the Sun center in C"
     header.setdefault("CRPIX2", crpix2)
+    header.comments["CRPIX2"] = "[pixel] CRPIX2: location of the Sun center in C"
+
     header.setdefault("XCEN", xcen)
+    header.comments["XCEN"] = "[arcsec] XCEN: location of the Sun center in C"
     header.setdefault("YCEN", ycen)
+    header.comments["YCEN"] = "[arcsec] YCEN: location of the Sun center in C"
 
     # Set default units and types
     header.setdefault("CUNIT1", "arcsec")
+    header.comments["CUNIT1"] = "[arcsec] CUNIT1: arcsec"
     header.setdefault("CUNIT2", "arcsec")
+    header.comments["CUNIT2"] = "[arcsec] CUNIT2: arcsec"
+
     header.setdefault("CTYPE1", "HPLN-TAN")
+    header.comments["CTYPE1"] = "CTYPE1: HPLN"
     header.setdefault("CTYPE2", "HPLT-TAN")
+    header.comments["CTYPE2"] = "CTYPE2: HPLT"
 
     # Ensure DATE-OBS or TSTART is available as obstime
     header.setdefault("DATE-OBS", header.get("TSTART", None))
+    header.comments["DATE-OBS"] = "[ISO] Observation date {DATE__OBS}"
+
+    if header["DATE-OBS"] is not None:
+        header["MJD-OBS"] = Time(header["DATE-OBS"], format="isot", scale="tai").mjd
+    else:
+        header["MJD-OBS"] = None
+    header.comments["MJD-OBS"] = "[d] MJD of fiducial time"
 
     # Ensure T_OBS is available, using TSTART and TEND
     t_obs = None  # Default if TSTART and TEND aren't present or parsing fails
@@ -1431,6 +1634,7 @@ def fill_header_for_wcs(header):
             t_obs = t_obs.strftime("%Y-%m-%dT%H:%M:%S.%f")
 
     header.setdefault("T_OBS", t_obs)
+    header.comments["T_OBS"] = "[TAI] nominal time"
 
     return header
 
@@ -1472,16 +1676,16 @@ def return_lonlat(header) -> tuple[np.ndarray, np.ndarray]:
     crlt_obs = header["CRLT_OBS"] * u.deg
     obstime = header["T_OBS"]
 
+    # Define observer's location in Heliographic Stonyhurst frame
+    observer = SkyCoord(lon=crln_obs, lat=crlt_obs, radius=dsun_obs,
+                        frame=HeliographicStonyhurst, obstime=obstime)
+
     # Assuming nx and ny are the dimensions of your image:
     nx, ny = header["NAXIS1"], header["NAXIS2"]
     y, x = np.indices((ny, nx))
 
     # Convert pixel coordinates to world coordinates (Helioprojective)
     hpc_coords = wcs.pixel_to_world(x, y)
-
-    # Define observer's location in Heliographic Stonyhurst frame
-    observer = SkyCoord(lon=crln_obs, lat=crlt_obs, radius=dsun_obs,
-                        frame=HeliographicStonyhurst, obstime=obstime)
 
     # Attach observer information to helioprojective coordinates
     hpc_coords = SkyCoord(hpc_coords.Tx, hpc_coords.Ty,
@@ -1497,6 +1701,9 @@ def return_lonlat(header) -> tuple[np.ndarray, np.ndarray]:
     # Apply the correction for the Carrington longitude; zero longitude in the central meridian
     lon = (lon + 360. - crln_obs.to(u.deg).value) % 360.
     lon[lon > 180.] -= 360.  # have if from -180 to +180
+
+    lon = np.clip(lon, a_min=-180., a_max=180.)
+    lat = np.clip(lat, a_min=-90., a_max=90.)
 
     return lon, lat
 
@@ -1523,7 +1730,7 @@ def data_b2ptr(index, bvec: np.ndarray, disambig: np.ndarray | None = None,
 
     if disambig is not None:
         # disambiguate azimuth; add 180 to azimuth for rotated images came from im_patch
-        bvec[2, :, :] = disambigue_azimuth(bvec[2, :, :], disambig, method=1,
+        bvec[2, :, :] = disambigue_azimuth(bvec[2, :, :], disambig, method="random",
                                            rotated_image="history" in index and "rotated" in str(index["history"]))
 
     # Convert bvec to B_xi, B_eta, B_zeta
@@ -1656,16 +1863,16 @@ def compute_mu(header) -> np.ndarray:
     crlt_obs = header["CRLT_OBS"] * u.deg
     obstime = header["DATE-OBS"]
 
+    # Define observer's location in Heliographic Stonyhurst frame
+    observer = SkyCoord(lon=crln_obs, lat=crlt_obs, radius=dsun_obs,
+                        frame=HeliographicStonyhurst, obstime=obstime)
+
     # Assuming nx and ny are the dimensions of your image:
     nx, ny = header["NAXIS1"], header["NAXIS2"]
     y, x = np.indices((ny, nx))
 
     # Convert pixel coordinates to world coordinates (Helioprojective)
     hpc_coords = wcs.pixel_to_world(x, y)
-
-    # Define observer's location in Heliographic Stonyhurst frame
-    observer = SkyCoord(lon=crln_obs, lat=crlt_obs, radius=dsun_obs,
-                        frame=HeliographicStonyhurst, obstime=obstime)
 
     # Attach observer information to helioprojective coordinates
     hpc_coords = SkyCoord(hpc_coords.Tx, hpc_coords.Ty,
