@@ -1,5 +1,5 @@
 from modules.utilities import check_dir, is_empty
-from modules.utilities_data import read_cotemporal_fits, prepare_hmi_data, gimme_bin_code_from_name
+from modules.utilities_data import read_cotemporal_fits, prepare_hmi_data, gimme_bin_code_from_name, return_lonlat
 from modules.NN_evaluate import process_patches
 from modules._constants import _model_config_file
 from modules._base_models import load_base_models
@@ -85,7 +85,8 @@ def write_to_fits(predictions: np.ndarray,
         output_file (str): Path to the output FITS file.
     """
     # Write the primary HDU to initialise the file
-    primary_hdu = fits.PrimaryHDU()
+    # Dummy data to force NAXIS creation for the header
+    primary_hdu = fits.PrimaryHDU(np.zeros(np.shape(predictions)[1:3], dtype=np.uint8))
     primary_hdu.header = header
     primary_hdu.writeto(output_file, overwrite=True)  # Overwrite if the file exists
 
@@ -184,6 +185,7 @@ def end_to_end_evaluate(data_dir: str,
                         used_quantities_str: str = "iptr",
                         remove_limb_dark: bool = True,
                         disambiguate: bool = True,
+                        disambiguate_method: int | Literal["radial_acute", "random", "potential_acute"] = "random",
                         interp_outliers: bool = False,
                         b_unit: Literal["kG", "G", "T", "mT"] = "G",
                         max_valid_size: int = 256,  # px x px
@@ -234,10 +236,13 @@ def end_to_end_evaluate(data_dir: str,
             fits_dict["fits_azi"] = None
             fits_dict["fits_disamb"] = None
 
-        data, lon, lat, header = prepare_hmi_data(**fits_dict,
-                                                  remove_limb_dark=remove_limb_dark,
-                                                  disambiguate=disambiguate,
-                                                  interpolate_outliers=interp_outliers)
+        data, header = prepare_hmi_data(**fits_dict,
+                                        remove_limb_dark=remove_limb_dark,
+                                        disambiguate=disambiguate,
+                                        disambiguate_method=disambiguate_method,
+                                        interpolate_outliers=interp_outliers)
+
+        lon, lat = return_lonlat(header)
 
         # Cut data to desired magnetic components
         if used_quantities[0] and any(used_quantities[1:]):  # [..., [ic, bp, bt, br]]
@@ -319,6 +324,7 @@ if __name__ == "__main__":
     parser.add_argument("--used_quantities", type=str, default="iptr")
     parser.add_argument("--remove_limb_dark", action="store_true")
     parser.add_argument("--disambiguate", action="store_true")
+    parser.add_argument("--disambiguate_method", type=str, default="random")
     parser.add_argument("--interp_outliers", action="store_true")
     parser.add_argument("--used_B_units", type=str, default="G")
     parser.add_argument("--max_valid_size", type=int, default=256)
@@ -333,6 +339,7 @@ if __name__ == "__main__":
                         used_quantities_str=args.used_quantities,
                         remove_limb_dark=args.remove_limb_dark,
                         disambiguate=args.disambiguate,
+                        disambiguate_method=args.disambiguate_method,
                         interp_outliers=args.interp_outliers,
                         b_unit=args.used_B_units,
                         max_valid_size=args.max_valid_size,
