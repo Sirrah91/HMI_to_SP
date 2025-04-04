@@ -517,7 +517,7 @@ def prepare_hmi_data(fits_ic: str | None = None,
                      fits_disamb: str | None = None,
                      remove_limb_dark: bool = True,
                      disambiguate: bool = True,
-                     disambiguate_method: int | Literal["radial_acute", "random", "potential_acute"] = "random",
+                     disambiguate_method: Literal[0, 1, 2, "radial_acute", "random", "potential_acute"] = "random",
                      interpolate_outliers: bool = False,
                      from_row: int | None = None,
                      to_row: int | None = None,
@@ -1227,11 +1227,11 @@ def create_full_video_from_fits_v2(fits_dir: str,
 
 
 def disambigue_azimuth(azimuth: np.ndarray, disambig: np.ndarray,
-                       method: int | Literal["radial_acute", "random", "potential_acute"] = "random",
+                       method: Literal[0, 1, 2, "radial_acute", "random", "potential_acute"] = "random",
                        rotated_image: bool = False) -> np.ndarray:
     """Disambiguate azimuth angles based on a given method and rotation setting."""
 
-    def parse_method(_method: int | Literal["radial_acute", "random", "potential_acute"]) -> int:
+    def parse_method(_method: Literal[0, 1, 2, "radial_acute", "random", "potential_acute"]) -> int:
         """Convert method input (string or int) into a valid integer index."""
         methods = {0: "potential_acute",
                    1: "random",
