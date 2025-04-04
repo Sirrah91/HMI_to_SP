@@ -185,7 +185,7 @@ def end_to_end_evaluate(data_dir: str,
                         used_quantities_str: str = "iptr",
                         remove_limb_dark: bool = True,
                         disambiguate: bool = True,
-                        disambiguate_method: int | Literal["radial_acute", "random", "potential_acute"] = "random",
+                        disambiguate_method: Literal[0, 1, 2, "radial_acute", "random", "potential_acute"] = "random",
                         interp_outliers: bool = False,
                         b_unit: Literal["kG", "G", "T", "mT"] = "G",
                         max_valid_size: int = 256,  # px x px
