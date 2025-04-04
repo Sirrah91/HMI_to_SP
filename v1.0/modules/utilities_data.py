@@ -1229,35 +1229,34 @@ def create_full_video_from_fits_v2(fits_dir: str,
 def disambigue_azimuth(azimuth: np.ndarray, disambig: np.ndarray,
                        method: int | Literal["radial_acute", "random", "potential_acute"] = "random",
                        rotated_image: bool = False) -> np.ndarray:
-    methods = {0: "potential_acute",
-               1: "random",
-               2: "radial_acute",
-               "default": 1}
+    """Disambiguate azimuth angles based on a given method and rotation setting."""
 
-    methods_reverse = {value: key for key, value in methods.items() if isinstance(key, int)}
+    def parse_method(_method: int | Literal["radial_acute", "random", "potential_acute"]) -> int:
+        """Convert method input (string or int) into a valid integer index."""
+        methods = {0: "potential_acute",
+                   1: "random",
+                   2: "radial_acute",
+                   "default": 1}
 
-    if isinstance(method, str):
-        if "potential" in method:
-            method = methods_reverse["potential_acute"]
-        elif "random" in method:
-            method = methods_reverse["random"]
-        elif "radial" in method:
-            method = methods_reverse["radial_acute"]
-        else:
-            warnings.warn(f'Invalid disambiguation method "{method}". Set to "{methods[methods["default"]]}".')
-            method = methods["default"]
+        methods_reverse = {value: key for key, value in methods.items() if isinstance(key, int)}
+        options = ", ".join(f'"{name}" == {number}' for name, number in methods_reverse.items())
 
-    elif isinstance(method, int):
-        if method not in methods:
-            warnings.warn(f'Invalid disambiguation method "{method}". Set to "{methods[methods["default"]]}".')
-            method = methods["default"]
+        original_method = _method  # Store original value for warning message
 
-    else:
-        warnings.warn(f'Invalid disambiguation method "{method}". Set to "{methods[methods["default"]]}".')
-        method = methods["default"]
+        # Convert string to corresponding integer
+        if isinstance(_method, str):
+            _method = methods_reverse.get(_method, None)
+
+        # Validate method (ensure it's one of the allowed int keys)
+        if not isinstance(_method, int) or _method not in methods:
+            warnings.warn(f'Invalid disambiguation method "{original_method}".\n'
+                          f'\tValid string or integer options: {options}. Defaulting to "{methods[methods["default"]]}".')
+            return methods["default"]
+
+        return _method
 
     def extract_bit(arr: np.ndarray, bit: int) -> np.ndarray:
-        """Exctract a specific bit from an encoded integer array"""
+        """Extract a specific bit from an encoded integer array"""
         arr = arr.astype(int)  # Ensure integer type
         # arr >> bit moves the binary representation of arr to the right by "bit" places
         # The bits that are shifted out are lost, e.g. 21 >> 2 (10101 -> 101.01 -> 101)
@@ -1272,18 +1271,18 @@ def disambigue_azimuth(azimuth: np.ndarray, disambig: np.ndarray,
     disambig = np.array(disambig, dtype=int)
     disambig_shape = np.shape(disambig)
     disambig = np.ravel(disambig)
-    diasmbig_matrix = np.array([f"{value:03b}"[method] for value in disambig], dtype=float)
-    diasmbig_matrix = np.reshape(diasmbig_matrix, disambig_shape)
+    disambig_matrix = np.array([f"{value:03b}"[method] for value in disambig], dtype=float)
+    disambig_matrix = np.reshape(disambig_matrix, disambig_shape)
     """
     
-    diasmbig_matrix = extract_bit(disambig, bit=method)
-    if rotated_image:
-        # im_patch rotate the image 180 deg
-        #  - add 180 deg to all pixels and add another 180 deg to those with disambig == 1
-        #  - efficiently add 180 deg only to those with disambig == 0  =>  (1 - disambig) * 180
-        return azimuth + (1. - diasmbig_matrix) * 180.
-    else:
-        return azimuth + diasmbig_matrix * 180.
+    disambig_matrix = extract_bit(disambig, bit=parse_method(method))
+
+    # im_patch rotate the image 180 deg
+    #  - add 180 deg to all pixels and add another 180 deg to those with disambig == 1
+    #  - efficiently add 180 deg only to those with disambig == 0  =>  (1 - disambig) * 180
+    correction = (1. - disambig_matrix) * 180. if rotated_image else disambig_matrix * 180.
+
+    return azimuth + correction
 
 
 def ar_info(ar_number: int) -> dict:
