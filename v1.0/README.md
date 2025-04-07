@@ -71,7 +71,7 @@ This option provides a streamlined, command-line interface for evaluating the mo
 
 # Pretrained Models
 
-For more information about the pretrained models, including details about training, tests, and performance, please refer to the paper by **David Korda, Jan Jurčák, Michal Švanda, and Nazaret Bello González, 2025, A&A, XXX, XXX** (https://doi.org/XXX).
+For more information about the pretrained models, including details about training, tests, and performance, please refer to the paper by **David Korda, Jan Jurčák, Michal Švanda, and Nazaret Bello González, 2025, A&A, XXX, XXX** (https://doi.org/10.1051/0004-6361/202553918).
 
 The pretrained models are named using a 4-bit binary code, where each bit indicates which quantity is included in the model:
 
