@@ -12,7 +12,9 @@
    - b. Continuum observations are corrected for limb darkening and normalised to quiet-Sun level.
    - c. All observations are interpolated to the **Hinode/SOT-SP resolution**, with latitude and longitude steps of `dlat = 0.31998` and `dlon = 0.29714` arcsec per pixel.
    - d. Rotates the data such that north is up and west is right.
-   - e. The output data form a 4D numpy array. The shape is `(num_observations, num_lat, num_lon, num_quantities)`.
+   - e. The output includes:
+      - A 4D NumPy array with shape `(num_observations, num_lat, num_lon, num_quantities)`.
+      - An updated FITS header containing information about remapped coordinates, orientation, and resolution.
 2. For data evaluation, we recommend using the `process_patches` function in `./modules/NN_evaluate.py`. This function is scalable and allows evaluation of full-disk observations with low memory usage.
    
 ## Minimum Version
@@ -31,7 +33,7 @@
    }
 
    # Prepare the data from FITS files
-   data = prepare_hmi_data(**hmi_fits)
+   data, header = prepare_hmi_data(**hmi_fits)
 
    # Select the used models
    model_names = load_base_models("base_models.conf")
