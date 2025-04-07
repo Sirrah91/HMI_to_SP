@@ -58,7 +58,7 @@ The `eval_data.py` script provides an easy way to evaluate the trained model on 
 - `--disambiguate`: (Optional) Flag to perform azimuthal disambiguation using the disambiguation FITS file in `--data_dir`.
 - `--disambiguate_method`: (Optional) Method to use if disambiguation is done. The default is `"random"`.  Other allowed methods are `"radial_acute"` (closest to radial from disk centre) and `"potential_acute"` (closest to potential field).
   > *Note: The models were trained using `"random"` disambiguation. Since this affects the noise statistics, using the same method is highly recommended to ensure optimal performance of the deconvolution model.*
-- `--interpolate_outliers`: (Optional) Computes a sliding window z-score and applies linear interpolation to data that are not finite, have magnetic field values above 10 kG, or have local z-scores exceeding 3 sigma.
+- `--interpolate_outliers`: (Optional) Flag to compute a sliding window z-score and apply linear interpolation to data that are not finite, have magnetic field values above 10 kG, or have local z-scores exceeding 3 sigma.
   > *Note: This option can be slow due to the interpolation process.*
 - `--used_B_units`: (Optional) Specifies the units for the magnetic field. The default is `"G"` (Gauss). Other allowed units are `"kG"` (kilogauss), `"T"` (Tesla), and `"mT"` (millitesla).
 - `--max_valid_size`: (Optional) Maximum allowed size for the patches to avoid memory issues. The default is `256`, meaning 256x256 pixels. Larger patch sizes may lead to memory overload, so it’s recommended to adjust this parameter based on available system memory.
