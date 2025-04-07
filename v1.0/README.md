@@ -45,7 +45,7 @@
 The `eval_data.py` script provides an easy way to evaluate the trained model on HMI FITS data. It simplifies the process of preparing data, running the model, and saving the results. Below is an example of how to use the script:
 
    ```bash
-   python eval_data.py --data_dir "${path_to_hmi_fits}" --output_dir "${path_to_output_folder}" --used_quantities iptr --remove_limb_dark --disambiguate --interpolate_outliers --used_B_units G --max_valid_size 256
+   python eval_data.py --data_dir "${path_to_hmi_fits}" --output_dir "${path_to_output_folder}" --used_quantities iptr --remove_limb_dark --disambiguate --disambiguate_method random --interpolate_outliers --used_B_units G --max_valid_size 256
    ```
 ## Options:
 
@@ -54,6 +54,8 @@ The `eval_data.py` script provides an easy way to evaluate the trained model on 
 - `--used_quantities`: (Optional) Specifies which quantities to use from the input FITS files. The default is `"iptr"`, which includes intensity and all components of the magnetic field.
 - `--remove_limb_dark`: (Optional) Flag to remove limb darkening from the intensity data.
 - `--disambiguate`: (Optional) Flag to perform azimuthal disambiguation using the disambiguation FITS file in `--data_dir`.
+- `--disambiguate_method`: (Optional) Method to use if disambiguation is done. The default is `"random"`.  Other allowed methods are `"radial_acute"` (closest to radial from disk centre) and `"potential_acute"` (closest to potential field).
+  > *Note: The models were trained using `"random"` disambiguation. Since this affects the noise statistics, using the same method is highly recommended to ensure optimal performance of the deconvolution model.*
 - `--interpolate_outliers`: (Optional) Computes a sliding window z-score and applies linear interpolation to data that are not finite, have magnetic field values above 10 kG, or have local z-scores exceeding 3 sigma.
   > *Note: This option can be slow due to the interpolation process.*
 - `--used_B_units`: (Optional) Specifies the units for the magnetic field. The default is `"G"` (Gauss). Other allowed units are `"kG"` (kilogauss), `"T"` (Tesla), and `"mT"` (millitesla).
