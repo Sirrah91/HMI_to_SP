@@ -397,7 +397,7 @@ def gimme_loss(used_quantities: np.ndarray | None = None,
 
     if loss_type.lower() == "ssim":
         return my_ssim_loss()
-    elif loss_type.lower() == "Cauchy":
+    elif loss_type.lower() == "cauchy":
         return my_cauchy_loss(used_quantities=used_quantities, c=c, alpha=alpha, weights=weights, bins=bins)
     else:
         return my_mse_loss(used_quantities=used_quantities, alpha=alpha, weights=weights, bins=bins)
