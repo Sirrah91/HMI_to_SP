@@ -479,8 +479,8 @@ def adjust_header_and_derotation(original_header,
     header["CDELT2"] = np.abs(row_correction * original_header["CDELT2"] / header["NAXIS2"])
 
     # Convert reference pixel position to new grid (after resize)
-    header["CRPIX1"] *= header["CDELT1"]
-    header["CRPIX2"] *= header["CDELT2"]
+    header["CRPIX1"] *= (original_header["CDELT1"] / header["CDELT1"])
+    header["CRPIX2"] *= (original_header["CDELT2"] / header["CDELT2"])
 
     # Handle flipping if CDELT1 or CDELT2 are negative
     if original_header["CDELT1"] < 0:
