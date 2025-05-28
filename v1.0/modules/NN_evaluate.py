@@ -396,16 +396,25 @@ def process_patches(model_names: list[str], image_4d: np.ndarray, kernel_size: i
     result = np.zeros_like(image_4d)
 
     # Iterate over patches
-    n_patches = len(list(range(0, nrows, max_valid_size))) * len(list(range(0, ncols, max_valid_size)))
+    row_starts = range(0, nrows - pad_size, max_valid_size)
+    col_starts = range(0, ncols - pad_size, max_valid_size)
+    n_patches = len(list(row_starts)) * len(list(col_starts))
     i_patch = 0
-    for i in range(0, nrows, max_valid_size):
-        for j in range(0, ncols, max_valid_size):
+    for i in row_starts:
+        for j in col_starts:
             i_patch += 1
             print(f"--------------- Progress: {i_patch}/{n_patches} ---------------")
             row_start = i
-            row_end = min(row_start + max_valid_size, nrows)
+            if row_start + max_valid_size + pad_size >= nrows:
+                row_end = nrows
+            else:
+                row_end = min(row_start + max_valid_size, nrows)
+
             col_start = j
-            col_end = min(col_start + max_valid_size, ncols)
+            if col_start + max_valid_size + pad_size >= nrows:
+                col_end = ncols
+            else:
+                col_end = min(col_start + max_valid_size, ncols)
 
             # Extract the patch from the padded image
             patch = image_4d[:, max(row_start - pad_size, 0):min(row_end + pad_size, nrows),
