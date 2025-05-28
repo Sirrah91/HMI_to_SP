@@ -617,7 +617,7 @@ def plot_me(x: np.ndarray | list, *args, backend: str = "TkAgg", fig_axis_tuple=
     plt.tight_layout()
 
     if backend in ["TkAgg", "Qt5Agg", "GTK3Agg", "WXAgg"]:
-        plt.show()
+        plt.show(block=False)
 
     return fig, axis
 
