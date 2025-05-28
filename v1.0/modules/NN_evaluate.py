@@ -1,6 +1,6 @@
 from modules.utilities_data import (load_npz, load_txt, print_header, print_info, gimme_bin_code_from_name,
                                     convert_unit, gimme_used_from_name, load_keras_model, adjust_params_from_weights,
-                                    gimme_combined_used_quantities)
+                                    gimme_combined_used_quantities, filename_data_to_data)
 
 from modules.control_plots import result_plots
 
@@ -8,8 +8,7 @@ from modules.utilities import is_empty, to_list, robust_load_weights
 
 from modules.NN_models import build_model, batch_size_estimate
 
-from modules._constants import (_wp, _quiet, _show_control_plot, _show_result_plot, _path_model, _observations_name,
-                                _b_unit)
+from modules._constants import (_wp, _quiet, _show_control_plot, _show_result_plot, _path_model, _b_unit)
 
 # defaults only
 from modules.NN_config import conf_model_setup
@@ -18,6 +17,7 @@ from os import path
 import numpy as np
 from typing import Literal
 from scipy.stats import trim_mean
+from itertools import product
 import h5py
 
 
@@ -38,40 +38,6 @@ def check_models(model_names: list[str]) -> str:
     return bin_codes[0]
 
 
-def filename_data_to_data(filename_or_data: str | np.ndarray,
-                          observation_name: str = _observations_name,
-                          sep: str = "\t", quiet: bool = False) -> np.ndarray:
-    if isinstance(filename_or_data, str):
-        # Import the test dataset
-        if not quiet:
-            print("Loading dataset")
-
-        if filename_or_data[-4:] == ".npz":
-            filename_or_data = load_npz(filename_or_data, subfolder="")
-            filename_or_data = np.array(filename_or_data[observation_name], dtype=_wp)
-
-        else:
-            filename_or_data = np.array(load_txt(filename_or_data, subfolder="", sep=sep, header=None), dtype=_wp)
-
-    elif isinstance(filename_or_data, np.lib.npyio.NpzFile):
-        filename_or_data = np.array(filename_or_data[observation_name], dtype=_wp)
-
-    else:
-        filename_or_data = np.array(filename_or_data, dtype=_wp)
-
-    # convert data to working precision
-    return np.array(filename_or_data, dtype=_wp)
-
-
-def set_observation_name(filename_or_data) -> str:
-    if isinstance(filename_or_data, str) and filename_or_data == "SP_HMI-like.npz":
-        observation_name = f"{_observations_name}_simulated"
-    else:
-        observation_name = _observations_name
-
-    return observation_name
-
-
 def filter_data_to_used(array: np.ndarray, used_quantities: np.ndarray) -> np.ndarray:
     no_quantities = np.shape(array)[-1]
     if no_quantities != np.sum(used_quantities):
@@ -90,7 +56,6 @@ def make_predictions(model_names: list[str],
                      proportiontocut: float | None = None,
                      which: str | None = None,
                      subfolder_model: str = "") -> np.ndarray:
-
     if not _quiet and which is not None:
         print(f"Evaluating the neural network on the {which} data")
 
@@ -136,10 +101,6 @@ def evaluate(model_names: list[str], filename_or_data: str | np.ndarray,
              final_b_unit: Literal["kG", "G", "T", "mT"] | None = None) -> np.ndarray:
     if final_b_unit is None:
         final_b_unit = initial_b_unit
-
-    # This function evaluates the mean model on new a dataset
-    if observation_name == "auto":
-        observation_name = set_observation_name(filename_or_data)
 
     if not model_names:
         raise ValueError('"model_names" is empty')
@@ -267,17 +228,22 @@ def evaluate_test_data(model_names: list[str], x_test: np.ndarray, y_test: np.nd
         if did_train:
             result_plots(x_train, y_train, predictions_train, used_quantities=used_quantities, suf=f"_{bin_code}_train")
         if did_other:
-            result_plots(x_others, y_others, predictions_others, used_quantities=used_quantities, suf=f"_{bin_code}_others")
+            result_plots(x_others, y_others, predictions_others, used_quantities=used_quantities,
+                         suf=f"_{bin_code}_others")
 
     # Convert predictions from G to target unit
     if did_train:
-        predictions_train = convert_unit(predictions_train, initial_unit="G", final_unit=final_b_unit, used_quantities=used_quantities)
+        predictions_train = convert_unit(predictions_train, initial_unit="G", final_unit=final_b_unit,
+                                         used_quantities=used_quantities)
     if did_val:
-        predictions_val = convert_unit(predictions_val, initial_unit="G", final_unit=final_b_unit, used_quantities=used_quantities)
+        predictions_val = convert_unit(predictions_val, initial_unit="G", final_unit=final_b_unit,
+                                       used_quantities=used_quantities)
     if did_test:
-        predictions_test = convert_unit(predictions_test, initial_unit="G", final_unit=final_b_unit, used_quantities=used_quantities)
+        predictions_test = convert_unit(predictions_test, initial_unit="G", final_unit=final_b_unit,
+                                        used_quantities=used_quantities)
     if did_other:
-        predictions_others = convert_unit(predictions_others, initial_unit="G", final_unit=final_b_unit, used_quantities=used_quantities)
+        predictions_others = convert_unit(predictions_others, initial_unit="G", final_unit=final_b_unit,
+                                          used_quantities=used_quantities)
 
     return {"train": {"predictions": predictions_train, "accuracy": acc_train},
             "val": {"predictions": predictions_val, "accuracy": acc_val},
@@ -295,9 +261,6 @@ def evaluate_by_parts(model_names: list[str], filename_or_data: str | np.ndarray
     # This function evaluates the single-quantity models on new a dataset and concatenates the outputs
     if final_b_unit is None:
         final_b_unit = initial_b_unit
-
-    if observation_name == "auto":
-        observation_name = set_observation_name(filename_or_data)
 
     if not model_names:
         raise ValueError('"model_names" is empty')
@@ -345,7 +308,8 @@ def evaluate_by_parts(model_names: list[str], filename_or_data: str | np.ndarray
     print("-----------------------------------------------------")
 
     # Convert predictions to desired unit
-    return convert_unit(predictions, initial_unit=_b_unit, final_unit=final_b_unit, used_quantities=used_quantities_total)
+    return convert_unit(predictions, initial_unit=_b_unit, final_unit=final_b_unit,
+                        used_quantities=used_quantities_total)
 
 
 def process_patches(model_names: list[str], image_4d: np.ndarray, kernel_size: int | str = "auto",
@@ -395,51 +359,54 @@ def process_patches(model_names: list[str], image_4d: np.ndarray, kernel_size: i
     # Initialize the result array (same size as padded image)
     result = np.zeros_like(image_4d)
 
-    # Iterate over patches
+    # Define starting indices for each patch.
+    # Stop at `nrows - pad_size` to leave enough space for the rightmost/bottommost patch
+    # to include padding, even if it ends at the image edge. See also the `if` condition
+    # handling boundary cases in the main loop.
     row_starts = range(0, nrows - pad_size, max_valid_size)
     col_starts = range(0, ncols - pad_size, max_valid_size)
     n_patches = len(list(row_starts)) * len(list(col_starts))
-    i_patch = 0
-    for i in row_starts:
-        for j in col_starts:
-            i_patch += 1
-            print(f"--------------- Progress: {i_patch}/{n_patches} ---------------")
-            row_start = i
-            if row_start + max_valid_size + pad_size >= nrows:
-                row_end = nrows
-            else:
-                row_end = min(row_start + max_valid_size, nrows)
 
-            col_start = j
-            if col_start + max_valid_size + pad_size >= nrows:
-                col_end = ncols
-            else:
-                col_end = min(col_start + max_valid_size, ncols)
+    # Iterate over patches
+    for i_patch, (row_start, col_start) in enumerate(product(row_starts, col_starts), 1):
+        print(f"--------------- Progress: {i_patch}/{n_patches} ---------------")
+        if row_start + max_valid_size + pad_size >= nrows:
+            # If the padded patch would exceed the image bounds, extend to the edge.
+            row_end = nrows
+        else:
+            row_end = min(row_start + max_valid_size, nrows)
 
-            # Extract the patch from the padded image
-            patch = image_4d[:, max(row_start - pad_size, 0):min(row_end + pad_size, nrows),
-                    max(col_start - pad_size, 0):min(col_end + pad_size, ncols), :]
+        if col_start + max_valid_size + pad_size >= ncols:
+            # If the padded patch would exceed the image bounds, extend to the edge.
+            col_end = ncols
+        else:
+            col_end = min(col_start + max_valid_size, ncols)
 
-            # Perform same-like convolution
-            conv_patch = evaluate_by_parts(model_names=model_names,
-                                           filename_or_data=patch,
-                                           proportiontocut=proportiontocut,
-                                           params=None,
-                                           subfolder_model=subfolder_model,
-                                           initial_b_unit=initial_b_unit,
-                                           final_b_unit=final_b_unit)
+        # Extract the patch from the padded image
+        patch = image_4d[:, max(row_start - pad_size, 0):min(row_end + pad_size, nrows),
+                max(col_start - pad_size, 0):min(col_end + pad_size, ncols), :]
 
-            # Determine valid region to cut from conv_patch
-            patch_shape = np.shape(conv_patch)
-            valid_row_start = 0 if row_start - pad_size <= 0 else pad_size
-            valid_row_end = patch_shape[1] if row_end + pad_size >= nrows else patch_shape[1] - pad_size
-            valid_col_start = 0 if col_start - pad_size <= 0 else pad_size
-            valid_col_end = patch_shape[2] if col_end + pad_size >= ncols else patch_shape[2] - pad_size
+        # Perform same-like convolution
+        conv_patch = evaluate_by_parts(model_names=model_names,
+                                       filename_or_data=patch,
+                                       proportiontocut=proportiontocut,
+                                       params=None,
+                                       subfolder_model=subfolder_model,
+                                       initial_b_unit=initial_b_unit,
+                                       final_b_unit=final_b_unit)
 
-            # Cut conv_patch to valid region
-            conv_patch = conv_patch[:, valid_row_start:valid_row_end, valid_col_start:valid_col_end, :]
+        # Determine valid region to cut from conv_patch
+        patch_shape = np.shape(conv_patch)
+        valid_row_start = 0 if row_start - pad_size <= 0 else pad_size
+        valid_row_end = patch_shape[1] if row_end + pad_size >= nrows else patch_shape[1] - pad_size
+        valid_col_start = 0 if col_start - pad_size <= 0 else pad_size
+        valid_col_end = patch_shape[2] if col_end + pad_size >= ncols else patch_shape[2] - pad_size
+        # Cut conv_patch to valid region
+        conv_patch = conv_patch[:, valid_row_start:valid_row_end, valid_col_start:valid_col_end, :]
 
-            # Place the valid part of the convolved patch into the padded result
-            result[:, row_start:row_end, col_start:col_end, :] = conv_patch
+        # Place the valid part of the convolved patch into the padded result
+        # row_end = row_start + (valid_row_end - valid_row_start)
+        # col_end = col_start + (valid_col_end - valid_col_start)
+        result[:, row_start:row_end, col_start:col_end, :] = conv_patch
 
     return result
