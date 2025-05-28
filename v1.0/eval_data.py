@@ -87,7 +87,7 @@ def write_to_fits(predictions: np.ndarray,
     # Write the primary HDU to initialise the file
     # Dummy data to force NAXIS creation for the header
     primary_hdu = fits.PrimaryHDU(np.zeros(np.shape(predictions)[1:3], dtype=np.uint8))
-    primary_hdu.header = header
+    primary_hdu.header.update(header)
     primary_hdu.writeto(output_file, overwrite=True)  # Overwrite if the file exists
 
     # Metadata for quantities
