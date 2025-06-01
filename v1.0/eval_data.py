@@ -18,7 +18,7 @@ import socket
 
 def check_hmi_format(string: str) -> bool:
     # Define the regex pattern based on your format
-    pattern = r"^hmi\.[a-zA-Z]+_\d+s\.\d{8}_\d{6}_TAI.*$"
+    pattern = r"^hmi\.[a-zA-Z_]+_\d+s(?:_[\w-]+)?(?:\.\d+)?\.\d{8}_\d{6}_TAI.*$"
 
     # Match the string against the pattern
     match = re.match(pattern, string)
@@ -28,16 +28,23 @@ def check_hmi_format(string: str) -> bool:
 
 
 def modify_hmi_string(string: str, used_quantities_str: str) -> str:
-    # Step 1: Replace the [a-zA-Z]+ part with used_quantities_str
-    modified_string = re.sub(r"(?<=hmi\.)[a-zA-Z]+", used_quantities_str, string)
+    # Step 1: Extract the product designation (e.g. ic, sharp, etc.)
+    match = re.match(r"^hmi\.([a-zA-Z_]+)_\d+s", string)
+    product = match.group(1) if match else ""
 
-    # Step 1: Add _dconANN to integration time
-    modified_string = re.sub(r"(hmi\.[a-zA-Z]+_\d+)s\.", r"\1s_dconANN.", modified_string)
+    # Step 2: Modify only if not SHARP
+    if not product.startswith("sharp"):
+        # Replace product with "proc"
+        string = re.sub(r"(?<=hmi\.)[a-zA-Z]+", "proc", string)
 
-    # Step 3: Replace everything after "TAI" with ".fits"
-    modified_string = re.sub(r"TAI.*$", "TAI.fits", modified_string)
+    # Step 3: Always append _dconANN to cadence string
+    # Match cadence like 720s or 720s_extraText and append _dconANN
+    string = re.sub(r"(\d+s(?:_\w+)?)(?=[\._])", r"\1_dconANN", string)
 
-    return modified_string
+    # Step 4: Replace everything after 'TAI' with 'TAI_{quantities}.fits'
+    string = re.sub(r"(TAI).*", fr"\1.{used_quantities_str}.fits", string)
+
+    return string
 
 
 def generate_output_filename(filename: str,
@@ -52,7 +59,7 @@ def generate_output_filename(filename: str,
     Returns:
         str: The generated output filename.
     """
-    output_filename = path.split(filename)[1]
+    output_filename = path.basename(filename)
 
     output_filename = output_filename.replace(".ptr.sav", "")
     output_filename = output_filename.replace(".field.fits", "")
@@ -61,7 +68,7 @@ def generate_output_filename(filename: str,
     if check_hmi_format(output_filename):
         output_filename = modify_hmi_string(output_filename, used_quantities_str)
     else:
-        output_filename = f"{output_filename}.{used_quantities_str}_dconANN.fits"
+        output_filename = f"{output_filename}.dconANN.{used_quantities_str}.fits"
 
     return output_filename
 
